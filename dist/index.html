@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f8f6f0">
+  <meta name="description" content="おもひでパラパラだ。表紙と写真に日付・ひとことを添えて、思い出を一冊に。好きな背景や印刷用の白い台紙を選び、PDFや編集データで端末に保存できます。">
+  <title>おもひでパラパラだ — 思い出を、一冊に。</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='9' y='5' width='46' height='54' rx='8' fill='%234b665b'/%3E%3Cpath d='M20 5v54' stroke='%23e9dbc3' stroke-width='3'/%3E%3Cpath d='M30 24h15M30 32h11' stroke='%23fff8e9' stroke-width='3'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body data-view="edit">
+  <svg class="svg-defs" aria-hidden="true"><defs>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M5 3h13a2 2 0 0 1 2 2v16H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3Zm2 0v14M3 18a2 2 0 0 1 2-2h15M11 7h5m-5 4h4"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m3 17 5-5 4 4 3-3 6 6"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 15v5h16v-5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7V4h6l2 3h10v13H3V7Z"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="m5 15 7-7 7 7"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m5 9 7 7 7-7"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></symbol>
+    <symbol id="i-zoom" viewBox="0 0 24 24"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6M10 7v6m-3-3h6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="m4 16-1 5 5-1L20 8l-4-4L4 16Zm9-9 4 4M3 21h18"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H5v20h14V7l-5-5Zm0 0v6h5M8 12h8m-8 4h8"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 2 3 7 7 3-7 3-3 7-3-7-7-3 7-3 3-7Z"/></symbol>
+  </defs></svg>
+
+  <header class="app-header">
+    <a class="brand" href="./" aria-label="おもひでパラパラだ ホーム">
+      <span class="brand-mark"><svg><use href="#i-book"/></svg></span>
+      <span><strong>おもひで<br class="brand-title-break">パラパラだ</strong><small>思い出を、一冊に。</small></span>
+    </a>
+    <div class="header-right">
+      <span id="save-status" class="save-status" role="status"><span class="status-dot"></span><span>準備中</span></span>
+      <button class="button button-quiet import-button" data-action="open-project"><svg><use href="#i-folder"/></svg><span>データを開く</span></button>
+      <button class="button button-primary" data-action="save-menu"><svg><use href="#i-download"/></svg><span>保存する</span></button>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <section class="intro" aria-labelledby="intro-heading">
+      <div><p class="eyebrow">YOUR MEMORY BOOK</p><h1 id="intro-heading">好きな一枚を、<em>あなたの一冊に。</em></h1><p class="intro-copy">写真を選んで、日付とひとこと。小さな思い出を綴ろう。</p></div>
+      <div class="intro-actions"><button class="text-button" data-action="demo"><svg><use href="#i-spark"/></svg>見本から試してみる</button><button class="text-button muted" data-action="new-album">新しいアルバム</button></div>
+    </section>
+
+    <p id="save-warning" class="save-warning" role="alert" hidden>自動保存を利用できません。「保存する」から編集データを端末に保存してください。</p>
+    <div class="workspace">
+      <aside class="pages-panel panel" aria-label="ページ一覧">
+        <div class="panel-heading"><h2>ページ</h2><span id="page-count" class="count-chip">表紙のみ</span></div>
+        <button class="button button-add" data-action="add-photos"><svg><use href="#i-plus"/></svg>写真をまとめて追加</button>
+        <nav id="page-list" class="page-list" aria-label="編集するページを選択"></nav>
+        <button class="blank-page-button" data-action="add-blank"><svg><use href="#i-plus"/></svg>空のページを追加</button>
+        <p class="sidebar-tip">画像はドラッグしても追加できます。</p>
+      </aside>
+
+      <section class="editor-panel panel" aria-label="ページの編集">
+        <div id="editor-heading" class="editor-heading"></div>
+        <form id="editor-form" novalidate></form>
+      </section>
+
+      <section class="preview-panel" aria-labelledby="preview-heading">
+        <div class="preview-heading"><div><h2 id="preview-heading">仕上がりプレビュー</h2><span class="paper-size">A5・縦</span></div><button class="icon-button" data-action="zoom" aria-label="プレビューを大きく見る" title="大きく見る"><svg><use href="#i-zoom"/></svg></button></div>
+        <div class="preview-stage" id="preview-stage"><div class="book-shadow"><canvas id="preview-canvas" width="1240" height="1754" role="img" aria-label="編集中のアルバムページ"></canvas></div><div id="preview-loading" class="preview-loading" hidden>読み込み中…</div></div>
+        <div class="preview-controls"><button class="icon-button" id="prev-page" data-action="previous" aria-label="前のページ"><svg><use href="#i-left"/></svg></button><span id="preview-position">表紙</span><button class="icon-button" id="next-page" data-action="next" aria-label="次のページ"><svg><use href="#i-right"/></svg></button></div>
+        <p class="preview-note">写真とことば、そのままの仕上がりを保存できます。</p>
+      </section>
+    </div>
+
+    <footer class="app-footer"><span><span class="local-dot"></span>写真は、この端末の中だけで処理します。</span><details><summary>保存について</summary><p>作業内容はこのブラウザに自動保存します。完成版はPDFで、続きを作りたいときは「編集データ」で端末に保存できます。別の端末では、保存した編集データを開いてください。</p></details></footer>
+  </main>
+
+  <nav class="mobile-view-tabs" aria-label="画面の切り替え"><button data-action="view-edit" aria-pressed="true"><svg><use href="#i-edit"/></svg>編集する</button><button data-action="view-preview" aria-pressed="false"><svg><use href="#i-eye"/></svg>仕上がりを見る</button></nav>
+
+  <input id="photo-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif,image/gif" multiple hidden>
+  <input id="single-photo-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif,image/gif" hidden>
+  <input id="background-input" type="file" accept="image/jpeg,image/png,image/webp,image/avif,image/gif" hidden>
+  <input id="project-input" type="file" accept=".json,.album,application/json" hidden>
+  <div id="drop-overlay" class="drop-overlay" hidden><div><svg><use href="#i-image"/></svg><strong>写真を置いて、ページに追加</strong><span>一度に何枚でも選べます</span></div></div>
+  <div id="toast" class="toast" role="status" hidden><span id="toast-message"></span><button data-action="undo" id="undo-button" hidden>取り消す</button></div>
+
+  <dialog id="save-dialog" class="save-dialog"><div class="dialog-heading"><div><p class="eyebrow">KEEP YOUR MEMORIES</p><h2>この一冊を、手元に。</h2></div><button class="icon-button" data-action="close-save" aria-label="保存メニューを閉じる"><svg><use href="#i-close"/></svg></button></div>
+    <p class="dialog-lead">用途に合わせて、保存の形を選べます。</p>
+    <button class="export-choice" data-action="export-pdf"><span class="export-icon"><svg><use href="#i-book"/></svg></span><span><strong>アルバムをPDFで保存</strong><small>表紙から最後まで、一冊に。閲覧・印刷用。</small></span><svg class="choice-arrow"><use href="#i-right"/></svg></button>
+    <button class="export-choice" data-action="export-png"><span class="export-icon secondary"><svg><use href="#i-image"/></svg></span><span><strong>今のページを画像で保存</strong><small>お気に入りの一枚を、PNG画像に。</small></span><svg class="choice-arrow"><use href="#i-right"/></svg></button>
+    <button class="export-choice" data-action="export-project"><span class="export-icon secondary"><svg><use href="#i-file"/></svg></span><span><strong>編集データを保存</strong><small>写真と文章をまとめて。あとから続きが作れます。</small></span><svg class="choice-arrow"><use href="#i-right"/></svg></button>
+    <div class="save-dialog-footer"><button class="text-button" data-action="open-project"><svg><use href="#i-folder"/></svg>保存した編集データを開く</button></div>
+  </dialog>
+
+  <dialog id="confirm-dialog" class="confirm-dialog"><h2 id="confirm-title"></h2><p id="confirm-copy"></p><div class="confirm-actions"><button class="button button-secondary" id="confirm-cancel">キャンセル</button><button class="button button-primary" id="confirm-ok">続ける</button></div></dialog>
+  <dialog id="progress-dialog" class="progress-dialog"><span class="spinner"></span><h2 id="progress-title">準備しています</h2><p id="progress-message" role="status">少しお待ちください。</p><progress id="progress-bar" max="1" value="0"></progress></dialog>
+  <dialog id="zoom-dialog" class="zoom-dialog"><div class="zoom-toolbar"><span id="zoom-title">プレビュー</span><button class="icon-button" data-action="close-zoom" aria-label="拡大プレビューを閉じる"><svg><use href="#i-close"/></svg></button></div><canvas id="zoom-canvas" width="1240" height="1754" role="img" aria-label="アルバムページの拡大プレビュー"></canvas></dialog>
+</body>
+</html>
