@@ -39,6 +39,7 @@
     </a>
     <div class="header-right">
       <span id="save-status" class="save-status" role="status"><span class="status-dot"></span><span>準備中</span></span>
+      <button class="button button-quiet shelf-button" type="button" data-action="open-shelf"><svg><use href="#i-book"/></svg><span>本棚</span></button>
       <button class="button button-quiet import-button" data-action="open-project"><svg><use href="#i-folder"/></svg><span>データを開く</span></button>
       <button class="button button-primary" data-action="save-menu"><svg><use href="#i-download"/></svg><span>保存する</span></button>
     </div>
@@ -47,10 +48,12 @@
   <main class="app-main">
     <section class="intro" aria-labelledby="intro-heading">
       <div><p class="eyebrow">YOUR MEMORY BOOK</p><h1 id="intro-heading">好きな一枚を、<em>あなたの一冊に。</em></h1><p class="intro-copy">写真を選んで、日付とひとこと。小さな思い出を綴ろう。</p></div>
-      <div class="intro-actions"><button class="button button-secondary read-book-button" type="button" data-action="read-book" aria-haspopup="dialog" aria-controls="book-dialog"><svg><use href="#i-book"/></svg>本をひらく</button><button class="text-button" data-action="demo"><svg><use href="#i-spark"/></svg>見本から試してみる</button><button class="text-button muted" data-action="new-album">新しいアルバム</button></div>
+      <div class="intro-actions"><button class="button button-secondary read-book-button" type="button" data-action="read-book"><svg><use href="#i-book"/></svg>本をひらく ↗</button><button class="text-button" data-action="demo"><svg><use href="#i-spark"/></svg>見本から試してみる</button><button class="text-button muted" data-action="new-album">新しいアルバム</button></div>
     </section>
 
-    <p id="save-warning" class="save-warning" role="alert" hidden>自動保存を利用できません。「保存する」から編集データを端末に保存してください。</p>
+    <p id="save-warning" class="save-warning" role="alert" hidden><span id="save-warning-copy">自動保存を利用できません。「保存する」から編集データを端末に保存してください。</span><button type="button" class="text-button" data-action="save-copy">別の本として保存</button></p>
+    <p id="restore-warning" class="save-warning" role="alert" hidden><span id="restore-warning-copy"></span> <a href="./bookshelf.html" target="_blank" rel="noopener">本棚を開く</a></p>
+    <p id="tab-open-help" class="tab-open-help" role="status" hidden><a id="tab-open-link" href="./bookshelf.html" target="_blank" rel="noopener">別タブで開く</a><button type="button" class="text-button" data-action="read-here">この画面で読む</button></p>
     <div class="workspace">
       <aside class="pages-panel panel" aria-label="ページ一覧">
         <div class="panel-heading"><h2>ページ</h2><span id="page-count" class="count-chip">表紙のみ</span></div>
@@ -73,7 +76,7 @@
       </section>
     </div>
 
-    <footer class="app-footer"><span><span class="local-dot"></span>写真は、この端末の中だけで処理します。</span><details><summary>保存について</summary><p>作業内容はこのブラウザに自動保存します。完成版はPDFで、続きを作りたいときは「編集データ」で端末に保存できます。別の端末では、保存した編集データを開いてください。</p></details></footer>
+    <footer class="app-footer"><span><span class="local-dot"></span>写真は、この端末の中だけで処理します。</span><details><summary>保存について</summary><p>作業内容はこのブラウザの本棚に、一冊ずつ自動保存します。別の端末・ブラウザ・URLとは共有されません。長く残すときは「編集データ」も端末に保存してください。PDFは閲覧・印刷用です。</p></details></footer>
   </main>
 
   <nav class="mobile-view-tabs" aria-label="画面の切り替え"><button data-action="view-edit" aria-pressed="true"><svg><use href="#i-edit"/></svg>編集する</button><button data-action="view-preview" aria-pressed="false"><svg><use href="#i-eye"/></svg>仕上がりを見る</button></nav>
@@ -87,6 +90,8 @@
 
   <dialog id="save-dialog" class="save-dialog"><div class="dialog-heading"><div><p class="eyebrow">KEEP YOUR MEMORIES</p><h2>この一冊を、手元に。</h2></div><button class="icon-button" data-action="close-save" aria-label="保存メニューを閉じる"><svg><use href="#i-close"/></svg></button></div>
     <p class="dialog-lead">用途に合わせて、保存の形を選べます。</p>
+    <button class="export-choice" data-action="save-shelf"><span class="export-icon"><svg><use href="#i-book"/></svg></span><span><strong>本棚に保存</strong><small>このブラウザに一冊ずつ残します。</small></span><svg class="choice-arrow"><use href="#i-right"/></svg></button>
+    <button class="export-choice" data-action="save-copy"><span class="export-icon secondary"><svg><use href="#i-plus"/></svg></span><span><strong>別の本として保存</strong><small>今の編集をコピーして、本棚に追加します。</small></span><svg class="choice-arrow"><use href="#i-right"/></svg></button>
     <button class="export-choice" data-action="export-pdf"><span class="export-icon"><svg><use href="#i-book"/></svg></span><span><strong>アルバムをPDFで保存</strong><small>表紙から最後まで、一冊に。閲覧・印刷用。</small></span><svg class="choice-arrow"><use href="#i-right"/></svg></button>
     <button class="export-choice" data-action="export-png"><span class="export-icon secondary"><svg><use href="#i-image"/></svg></span><span><strong>今のページを画像で保存</strong><small>お気に入りの一枚を、PNG画像に。</small></span><svg class="choice-arrow"><use href="#i-right"/></svg></button>
     <button class="export-choice" data-action="export-project"><span class="export-icon secondary"><svg><use href="#i-file"/></svg></span><span><strong>編集データを保存</strong><small>写真と文章をまとめて。あとから続きが作れます。</small></span><svg class="choice-arrow"><use href="#i-right"/></svg></button>

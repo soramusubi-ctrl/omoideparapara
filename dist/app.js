@@ -1,8 +1,11 @@
-import { createAlbum, makeId, loadDraft, saveDraft, validateAlbum, serializeAlbum, fileToImage } from './storage.js';
+import { createAlbum, makeId, serializeAlbum, fileToImage } from './storage.js';
 import { PAGE_WIDTH, PAGE_HEIGHT, renderAlbumPage, downloadPdf, downloadPng, downloadBlob, sanitizeFilename } from './album-renderer.js';
-import { MAX_PROJECT_BYTES, assertProjectBudget } from './album-limits.js';
+import { assertProjectBudget } from './album-limits.js';
 import { FONT_OPTIONS } from './album-fonts.js';
 import { createAlbumReader } from './album-reader.js';
+import { listAlbums, loadSavedAlbum, saveAlbum, migrateLegacyDraft } from './shelf-storage.js';
+import { createAlbumWriter } from './album-writer.js';
+import { readAlbumFile, decodeAlbumImages } from './album-import.js';
 
 const FRAME_OPTIONS = Object.freeze([
   { value: 'none', label: '枠なし' },
@@ -25,7 +28,8 @@ let saveTimer;
 let previewTimer;
 let previewGeneration = 0;
 let toastTimer;
-let saveQueue = Promise.resolve();
+const albumWriter = createAlbumWriter({ saveAlbum });
+const storedAlbums = new Set();
 let lastUndo = null;
 let dragDepth = 0;
 let lastSaveError = '';
@@ -52,24 +56,80 @@ function setStatus(state, text) {
   $('#save-warning').hidden = state !== 'error';
 }
 
+function updateAlbumAddress() {
+  const url = new URL(window.location.href);
+  url.searchParams.set('album', album.id);
+  url.searchParams.delete('new');
+  window.history.replaceState(null, '', url);
+}
+
+function adoptSavedAlbum(record, { render = true } = {}) {
+  album = record.album;
+  albumWriter.seed(album.id, record.revision);
+  storedAlbums.add(album.id);
+  selected = 0;
+  revision += 1;
+  savedRevision = revision;
+  lastUndo = null;
+  $('#undo-button').hidden = true;
+  lastSaveError = '';
+  updateAlbumAddress();
+  setStatus('saved', '本棚に保存済み');
+  if (render) renderAll();
+}
+
 async function persist() {
   clearTimeout(saveTimer);
   const targetRevision = revision;
   const savedCopy = snapshot();
+  if (storedAlbums.has(savedCopy.id) && targetRevision <= savedRevision) return true;
   setStatus('saving', '端末に保存しています');
-  const operation = saveQueue.catch(() => {}).then(() => saveDraft(savedCopy));
-  saveQueue = operation;
   try {
-    await operation;
+    await albumWriter.save(savedCopy);
+    storedAlbums.add(savedCopy.id);
     savedRevision = Math.max(savedRevision, targetRevision);
     lastSaveError = '';
-    if (targetRevision === revision) setStatus('saved', 'この端末に保存済み');
+    if (savedCopy.id === album.id && targetRevision === revision) {
+      updateAlbumAddress();
+      setStatus('saved', '本棚に保存済み');
+    }
+    return true;
   } catch (error) {
-    if (targetRevision !== revision) return;
-    setStatus('error', '自動保存できません');
+    if (targetRevision !== revision || savedCopy.id !== album.id) return false;
+    const conflict = error?.code === 'ALBUM_CONFLICT';
+    setStatus('error', conflict ? '別タブの更新があります' : '自動保存できません');
+    $('#save-warning-copy').textContent = conflict
+      ? '別のタブでこの本が更新されています。「別の本として保存」で今の編集を残せます。'
+      : '自動保存できません。「保存する」から編集データを端末に保存してください。';
     if (lastSaveError !== error.message) toast(error.message || '端末に保存できません。編集データを書き出して保管してください。');
     lastSaveError = error.message;
+    return false;
   }
+}
+
+async function preserveCurrentAlbum() {
+  if (!hasContent() && revision <= savedRevision && !storedAlbums.has(album.id)) return true;
+  return persist();
+}
+
+async function openSavedTab(kind) {
+  $('#tab-open-help').hidden = true;
+  const tab = window.open('about:blank', '_blank');
+  if (tab) tab.opener = null;
+  try {
+    const saved = kind === 'book' ? await persist() : await preserveCurrentAlbum();
+    if (!saved && kind === 'book') { tab?.close(); return; }
+    if (!saved) toast('今の編集はこのタブに残っています。本棚には最後に保存できた内容を表示します。');
+    const target = new URL(kind === 'book' ? './book.html' : './bookshelf.html', window.location.href);
+    if (kind === 'book') target.searchParams.set('album', album.id);
+    if (tab && !tab.closed) tab.location.replace(target.href);
+    else {
+      $('#tab-open-link').href = target.href;
+      $('#tab-open-link').textContent = kind === 'book' ? '別タブで本をひらく' : '別タブで本棚をひらく';
+      $('#tab-open-help').hidden = false;
+      toast('保存できました。画面上のリンクを押して、別タブで開いてください。');
+    }
+  } catch (error) { tab?.close(); throw error; }
 }
 
 function commit({ full = false, undo = null } = {}) {
@@ -285,47 +345,25 @@ async function replaceBackground(file) {
   });
 }
 
-async function decodeImportedImages(candidate) {
-  const values = [...new Set([candidate.coverImage, candidate.backgroundImage, ...candidate.pages.map((page) => page.image)].filter(Boolean))];
-  for (let index = 0; index < values.length; index++) {
-    progress(index, Math.max(values.length, 1), `写真を確認しています ${index + 1} / ${values.length}`);
-    const image = new Image();
-    await new Promise((resolve, reject) => {
-      image.onload = () => {
-        if (!image.naturalWidth || !image.naturalHeight || image.naturalWidth * image.naturalHeight > 160000000) reject(new Error('編集データの画像サイズを確認してください。'));
-        else resolve();
-      };
-      image.onerror = () => reject(new Error('編集データに読み込めない画像が含まれています。元の編集データを選び直してください。'));
-      image.src = values[index];
-    });
-    image.src = '';
-  }
-}
-
 async function openProject(file) {
   if (!file || busy) return;
-  $('#save-dialog').close();
-  if (file.size > MAX_PROJECT_BYTES) throw new Error('編集データは200MB以内のファイルを選んでください。');
-  let candidate;
-  try { candidate = validateAlbum(JSON.parse(await file.text())); }
-  catch (error) { throw new Error(error instanceof SyntaxError ? 'アルバムの編集データ（.album.json）を選んでください。' : error.message); }
-  assertProjectBudget(candidate);
   albumReader.close();
-  if (hasContent() && !await confirmAction('編集データを開きますか？', 'いま表示しているアルバムを、選んだ編集データに置き換えます。\nいまの内容を残す場合は、先に編集データで保存してください。', '置き換えて開く')) return;
   await busyTask('アルバムを開いています', async () => {
-    await decodeImportedImages(candidate);
-    const undo = { album: snapshot(), selected };
-    album = candidate;
-    selected = 0;
-    commit({ full: true, undo });
+    const candidate = await readAlbumFile(file);
+    await decodeAlbumImages(candidate, { onProgress: ({ current, total }) => progress(current, Math.max(total, 1), `写真を確認しています ${current} / ${total}`) });
+    if (!await preserveCurrentAlbum()) throw new Error('いまの編集を本棚に保存できませんでした。先に編集データを端末へ保存してください。');
+    const now = new Date().toISOString();
+    const imported = { ...candidate, id: makeId(), createdAt: now, updatedAt: now };
+    const stored = await albumWriter.save(imported);
+    adoptSavedAlbum(stored);
     setView('edit');
-    toast('保存したアルバムを開きました。', true);
+    toast('編集データから、本棚にアルバムを追加しました。');
   });
 }
 
 async function loadDemo() {
-  if (hasContent() && !await confirmAction('見本のアルバムを開きますか？', 'いまの内容を見本に置き換えます。\n残しておきたい場合は、先に編集データで保存してください。', '見本を開く')) return;
   await busyTask('見本のアルバムを用意しています', async () => {
+    if (!await preserveCurrentAlbum()) throw new Error('いまの編集を本棚に保存できませんでした。先に編集データを端末へ保存してください。');
     const definitions = [
       ['cavalry.webp', 'はちまきは水色。みんなで大笑いした、体育祭の一枚。'],
       ['courtyard.webp', '休憩中も、それぞれの時間。こっそり覗く人がひとり。'],
@@ -341,11 +379,9 @@ async function loadDemo() {
       const result = await fileToImage(new File([blob], filename, { type: blob.type || 'image/webp' }));
       pages.push({ ...newPage(result.dataUrl, filename), date: '2026-10-15', note });
     }
-    const undo = { album: snapshot(), selected };
-    album = { ...createAlbum(), title: 'ポルトガルの思い出', subtitle: '青いジャージでめぐった、にぎやかな一日。', coverImage: pages[0].image, coverImageName: pages[0].imageName, pages };
-    selected = 0;
-    commit({ full: true, undo });
-    toast('見本を入れました。写真も文章も自由に変えられます。', true);
+    const demo = { ...createAlbum(), title: 'ポルトガルの思い出', subtitle: '青いジャージでめぐった、にぎやかな一日。', coverImage: pages[0].image, coverImageName: pages[0].imageName, pages };
+    adoptSavedAlbum(await albumWriter.save(demo));
+    toast('見本を別のアルバムとして本棚に追加しました。');
   });
 }
 
@@ -369,7 +405,9 @@ async function handleAction(action, button) {
     case 'view-edit': setView('edit'); break;
     case 'view-preview': setView('preview'); break;
     case 'zoom': copyToZoom(); $('#zoom-dialog').showModal(); break;
-    case 'read-book': await albumReader.open(selected); break;
+    case 'read-book': await openSavedTab('book'); break;
+    case 'read-here': await albumReader.open(selected); break;
+    case 'open-shelf': await openSavedTab('shelf'); break;
     case 'close-zoom': $('#zoom-dialog').close(); break;
     case 'theme': album.theme = button.dataset.theme; commit({ full: true }); break;
     case 'font': {
@@ -430,9 +468,27 @@ async function handleAction(action, button) {
       album = previous.album; selected = previous.selected; commit({ full: true }); toast('元に戻しました。'); break;
     }
     case 'new-album': {
-      if (hasContent() && !await confirmAction('新しいアルバムを始めますか？', 'いまの内容を残す場合は、先にPDFや編集データで保存してください。', '新しく始める')) break;
-      const undo = { album: snapshot(), selected };
-      album = createAlbum(); selected = 0; commit({ full: true, undo }); setView('edit'); toast('新しいアルバムを始めました。', true); break;
+      await busyTask('新しいアルバムを用意しています', async () => {
+        if (!await preserveCurrentAlbum()) throw new Error('いまの編集を保存できませんでした。先に編集データを端末へ保存してください。');
+        adoptSavedAlbum(await albumWriter.save(createAlbum()));
+        setView('edit');
+        toast('新しいアルバムを本棚に追加しました。');
+      });
+      break;
+    }
+    case 'save-shelf': {
+      await busyTask('本棚に保存しています', async () => { if (await persist()) toast('本棚に保存しました。'); });
+      break;
+    }
+    case 'save-copy': {
+      await busyTask('別の本として保存しています', async () => {
+        clearTimeout(saveTimer);
+        const now = new Date().toISOString();
+        const copy = { ...snapshot(), id: makeId(), title: `${Array.from(album.title || 'アルバム').slice(0, 110).join('')}（コピー）`, createdAt: now, updatedAt: now };
+        adoptSavedAlbum(await albumWriter.save(copy));
+        toast('今の編集を別の本として本棚に残しました。');
+      });
+      break;
     }
     case 'demo': await loadDemo(); break;
     case 'export-project': {
@@ -527,16 +583,37 @@ window.addEventListener('beforeunload', (event) => {
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && revision > savedRevision) void persist(); });
 
 async function init() {
-  let loadFailed = false;
   try {
-    const restored = await loadDraft();
-    if (restored) { album = restored; setStatus('saved', 'この端末に保存済み'); }
+    const migration = await migrateLegacyDraft();
+    if (migration.invalid) {
+      $('#restore-warning').hidden = false;
+      $('#restore-warning-copy').textContent = '以前の自動保存を読み込めませんでした。元データは残しています。本棚から書き出して確認できます。';
+    }
+    const params = new URL(window.location.href).searchParams;
+    const requestedId = params.get('album');
+    let stored = null;
+    if (params.get('new') !== '1') {
+      if (requestedId) {
+        stored = await loadSavedAlbum(requestedId);
+        if (!stored) throw new Error('この本が保存先に見つかりません。本棚か、以前使っていたURL・ブラウザを確認してください。');
+      } else {
+        const entries = await listAlbums();
+        if (entries.length) {
+          stored = await loadSavedAlbum(entries[0].id);
+          if (!stored) throw new Error('本棚に登録された本のデータを読み込めません。本棚から保存状況を確認してください。');
+        }
+      }
+    }
+    if (stored) adoptSavedAlbum(stored, { render: false });
     else setStatus('saved', '写真からはじめよう');
-  } catch (error) { loadFailed = true; setStatus('error', '自動保存を利用できません'); toast(error.message); }
+  } catch (error) {
+    setStatus('error', '保存データを確認できません');
+    $('#save-warning-copy').textContent = `${error.message} 残っている保存データは上書きしていません。`;
+    toast(error.message);
+  }
   ready = true;
   renderAll();
-  // An unreadable existing draft is not overwritten until the user explicitly edits.
-  if (!loadFailed && !hasContent()) void persist();
+  // Opening an empty or failed tab never creates a save or overwrites old data.
 }
 
 init().catch(reportError);
