@@ -34,6 +34,7 @@ function instrumentedCanvas() {
   const fills = [];
   const measurements = [];
   const rectangles = [];
+  const curves = [];
   const proxy = new Proxy(base, {
     get(target, property) {
       if (property === 'fillText') return (value, x, y) => {
@@ -56,13 +57,17 @@ function instrumentedCanvas() {
         rectangles.push(args);
         return target.rect(...args);
       };
+      if (property === 'quadraticCurveTo') return (...args) => {
+        curves.push(args);
+        return target.quadraticCurveTo(...args);
+      };
       const value = Reflect.get(target, property, target);
       return typeof value === 'function' ? value.bind(target) : value;
     },
     set(target, property, value) { return Reflect.set(target, property, value, target); },
   });
   canvas.getContext = () => proxy;
-  return { canvas, text, images, fills, measurements, rectangles };
+  return { canvas, text, images, fills, measurements, rectangles, curves };
 }
 
 function solidImage(color, width = 10, height = 10) {
@@ -395,7 +400,7 @@ test('missing and none frames retain original pixels, including empty photos and
       const baseline = instrumentedCanvas();
       await renderAlbumPage(baseline.canvas, baselineAlbum, index);
       const baselinePng = baseline.canvas.toBuffer('image/png');
-      for (const frame of image ? ['none'] : ['none', 'white', 'polaroid', 'corners']) {
+      for (const frame of image ? ['none'] : ['none', 'white', 'polaroid', 'rounded']) {
         const framed = instrumentedCanvas();
         await renderAlbumPage(framed.canvas, { ...baselineAlbum, coverFrame: frame, pages: baselineAlbum.pages.map(page => ({ ...page, frame })) }, index);
         assert.deepEqual(framed.canvas.toBuffer('image/png'), baselinePng, `${theme} page ${index}: ${frame}`);
@@ -404,7 +409,7 @@ test('missing and none frames retain original pixels, including empty photos and
   }
 });
 
-test('all contain frames preserve portrait and panorama image corners on cover and interior', { skip: !canvasModule }, async () => {
+test('all contain frames preserve portrait and panorama image edge regions on cover and interior', { skip: !canvasModule }, async () => {
   globalThis.Image = canvasModule.Image;
   for (const [width, height] of [[400, 200], [200, 400], [1600, 60], [60, 1600]]) {
     const source = canvasModule.createCanvas(width, height);
@@ -416,7 +421,7 @@ test('all contain frames preserve portrait and panorama image corners on cover a
       ctx.fillRect(corner % 2 ? width * 0.75 : 0, corner > 1 ? height * 0.75 : 0, width * 0.25, height * 0.25);
     }
     const image = source.toDataURL();
-    for (const frame of ['none', 'white', 'polaroid', 'corners']) for (const index of [0, 1]) {
+    for (const frame of ['none', 'white', 'polaroid', 'rounded']) for (const index of [0, 1]) {
       const record = instrumentedCanvas();
       await renderAlbumPage(record.canvas, { ...album, theme: 'plain', coverImage: image, coverFit: 'contain', coverFrame: frame, pages: [{ image, fit: 'contain', frame, note: '', date: '' }] }, index);
       const [, x, y, photoWidth, photoHeight] = record.images[0].args;
@@ -427,8 +432,6 @@ test('all contain frames preserve portrait and panorama image corners on cover a
       if (frame !== 'none') {
         const [boxX, boxY, boxWidth, boxHeight] = record.rectangles[0];
         assert.ok(x > boxX && y > boxY && x + photoWidth < boxX + boxWidth && y + photoHeight < boxY + boxHeight);
-        const tab = frame === 'corners' ? rgbAt(record.canvas, Math.floor(x - 12), Math.floor(y - 12)) : null;
-        if (tab) assert.deepEqual(tab, [255, 255, 255]);
       }
     }
   }
@@ -448,7 +451,7 @@ test('frames stay inside the original photo box and never change metadata or the
     await renderAlbumPage(baseline.canvas, longAlbum, index);
     const [x, y, width, height] = baseline.rectangles.at(-1);
     const baselinePixels = baseline.canvas.getContext('2d').getImageData(0, 0, PAGE_WIDTH, PAGE_HEIGHT).data;
-    for (const frame of ['white', 'polaroid', 'corners']) {
+    for (const frame of ['white', 'polaroid', 'rounded']) {
       const framed = instrumentedCanvas();
       await renderAlbumPage(framed.canvas, { ...longAlbum, coverFrame: frame, pages: longAlbum.pages.map(page => ({ ...page, frame })) }, index);
       assert.deepEqual(framed.text, baseline.text);
@@ -473,7 +476,7 @@ test('frames stay inside the original photo box and never change metadata or the
 test('cover-fit frames clip photo pixels inside paper borders and polaroid has extra lower paper', { skip: !canvasModule }, async () => {
   globalThis.Image = canvasModule.Image;
   const image = solidImage('#2577bc', 100, 300);
-  for (const frame of ['white', 'polaroid', 'corners']) {
+  for (const frame of ['white', 'polaroid']) {
     const record = instrumentedCanvas();
     await renderAlbumPage(record.canvas, { ...album, theme: 'plain', pages: [{ image, fit: 'cover', frame, date: '', note: '' }] }, 1);
     const [x, y, width, height] = record.rectangles.at(-1);
@@ -481,9 +484,7 @@ test('cover-fit frames clip photo pixels inside paper borders and polaroid has e
     assert.ok(drawWidth >= width && drawHeight >= height);
     assert.ok(drawX <= x && drawY <= y);
     assert.deepEqual(rgbAt(record.canvas, x + width / 2, y + height / 2), [37, 119, 188]);
-    if (frame === 'corners') {
-      assert.deepEqual(rgbAt(record.canvas, x + 2, y + 2), [37, 119, 188]);
-    } else {
+    {
       const outer = record.fills.at(-1).args;
       const top = y - outer[1];
       const bottom = outer[1] + outer[3] - y - height;
@@ -492,6 +493,42 @@ test('cover-fit frames clip photo pixels inside paper borders and polaroid has e
       if (frame === 'polaroid') assert.ok(bottom > top * 3);
       else assert.ok(Math.abs(bottom - top) < 0.01);
     }
+  }
+});
+
+test('rounded frames retain rectangular fitting, expose paper at photo corners, and accept legacy corners', { skip: !canvasModule }, async () => {
+  globalThis.Image = canvasModule.Image;
+  const image = solidImage('#2577bc', 300, 200);
+  for (const fit of ['contain', 'cover']) for (const index of [0, 1]) {
+    const source = { ...album, theme: 'plain', coverImage: image, coverFit: fit, pages: [{ image, fit, date: '', note: '' }] };
+    const white = instrumentedCanvas();
+    await renderAlbumPage(white.canvas, { ...source, coverFrame: 'white', pages: [{ ...source.pages[0], frame: 'white' }] }, index);
+    const rounded = instrumentedCanvas();
+    await renderAlbumPage(rounded.canvas, { ...source, coverFrame: 'rounded', pages: [{ ...source.pages[0], frame: 'rounded' }] }, index);
+    assert.deepEqual(rounded.images[0].args.slice(1), white.images[0].args.slice(1), 'Only corners may be clipped; rectangular fitting must remain unchanged.');
+    assert.deepEqual(rounded.text, white.text);
+    const [x, y, width, height] = white.rectangles.at(-1);
+    for (const [px, py] of [[x + 2, y + 2], [x + width - 3, y + 2], [x + 2, y + height - 3], [x + width - 3, y + height - 3]]) {
+      assert.deepEqual(rgbAt(white.canvas, px, py), [37, 119, 188]);
+      assert.deepEqual(rgbAt(rounded.canvas, px, py), [255, 255, 255]);
+    }
+    for (const [px, py] of [[x + width / 2, y + 2], [x + width / 2, y + height - 3], [x + 2, y + height / 2], [x + width - 3, y + height / 2], [x + width / 2, y + height / 2]]) {
+      assert.deepEqual(rgbAt(rounded.canvas, px, py), [37, 119, 188]);
+    }
+    const legacy = instrumentedCanvas();
+    await renderAlbumPage(legacy.canvas, { ...source, coverFrame: 'corners', pages: [{ ...source.pages[0], frame: 'corners' }] }, index);
+    assert.deepEqual(legacy.canvas.toBuffer('image/png'), rounded.canvas.toBuffer('image/png'));
+  }
+});
+
+test('rounded radii stay finite at extreme aspect ratios on cover and interior', { skip: !canvasModule }, async () => {
+  globalThis.Image = canvasModule.Image;
+  for (const [width, height] of [[2400, 1], [1, 2400]]) for (const fit of ['contain', 'cover']) for (const index of [0, 1]) {
+    const image = solidImage('#2577bc', width, height);
+    const record = instrumentedCanvas();
+    await renderAlbumPage(record.canvas, { ...album, coverImage: image, coverFit: fit, coverFrame: 'rounded', pages: [{ image, frame: 'rounded', fit, date: '', note: '' }] }, index);
+    assert.ok(record.curves.flat().every(Number.isFinite));
+    assert.ok(record.images[0].args.slice(1).every(Number.isFinite));
   }
 });
 
@@ -642,7 +679,7 @@ test('browser download APIs produce actual PNG and all album pages in a PDF', { 
     const photo = solidImage('#348bb2', 600, 250);
     const framedAlbum = {
       ...exportAlbum, coverImage: photo, coverFrame: 'white',
-      pages: ['polaroid', 'corners'].map(frame => ({ image: photo, frame, fit: 'contain', date: '', note: '' })),
+      pages: ['polaroid', 'rounded'].map(frame => ({ image: photo, frame, fit: 'contain', date: '', note: '' })),
     };
     const framedPng = await downloadPng(framedAlbum, 1);
     const pngImage = await canvasModule.loadImage(Buffer.from(await framedPng.arrayBuffer()));

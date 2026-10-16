@@ -38,14 +38,14 @@ test('new album has independent valid empty defaults', () => {
 });
 
 test('legacy version-one albums normalize missing cover and page frames without changing source content', () => {
-  const legacy = { ...createAlbum(), pages: [page({ note: '  大切な写真\nそのまま  ' }), page({ frame: 'corners' })] };
+  const legacy = { ...createAlbum(), pages: [page({ note: '  大切な写真\nそのまま  ' }), page({ frame: 'rounded' })] };
   delete legacy.coverFrame;
   delete legacy.pages[0].frame;
   const normalized = validateAlbum(legacy);
   assert.equal(normalized.schemaVersion, 1);
   assert.equal(normalized.coverFrame, 'none');
   assert.equal(normalized.pages[0].frame, 'none');
-  assert.equal(normalized.pages[1].frame, 'corners');
+  assert.equal(normalized.pages[1].frame, 'rounded');
   assert.equal(normalized.pages[0].note, legacy.pages[0].note);
   assert.equal(Object.hasOwn(legacy, 'coverFrame'), false);
   assert.equal(Object.hasOwn(legacy.pages[0], 'frame'), false);
@@ -53,12 +53,12 @@ test('legacy version-one albums normalize missing cover and page frames without 
 });
 
 test('cover and page frames require exact supported values and reject accessors without invoking them', () => {
-  for (const frame of ['none', 'white', 'polaroid', 'corners']) {
+  for (const frame of ['none', 'white', 'polaroid', 'rounded']) {
     const normalized = validateAlbum({ ...createAlbum(), coverFrame: frame, pages: [page({ frame })] });
     assert.equal(normalized.coverFrame, frame);
     assert.equal(normalized.pages[0].frame, frame);
   }
-  for (const frame of [undefined, null, '', 'White', ' white ', 'unknown', 'constructor', true, 1, {}, [], new String('white')]) {
+  for (const frame of [undefined, null, '', 'White', ' white ', ' corners ', 'Corners', 'unknown', 'constructor', true, 1, {}, [], new String('white'), new String('corners')]) {
     assert.throws(() => validateAlbum({ ...createAlbum(), coverFrame: frame }), /表紙のフレーム/);
     assert.throws(() => validateAlbum({ ...createAlbum(), pages: [page({ frame })] }), /写真のフレーム/);
   }
@@ -311,7 +311,7 @@ test('each supported font survives JSON and draft save/load roundtrips', async (
 
 test('independent cover and page frames survive JSON and draft save/load roundtrips', async () => {
   const fake = installFakeIndexedDB();
-  const frames = ['none', 'white', 'polaroid', 'corners'];
+  const frames = ['none', 'white', 'polaroid', 'rounded'];
   try {
     for (const coverFrame of frames) {
       const album = { ...createAlbum(), coverFrame, pages: frames.map((frame) => page({ frame })) };
@@ -322,6 +322,29 @@ test('independent cover and page frames survive JSON and draft save/load roundtr
       assert.equal(fake.state.value.coverFrame, coverFrame);
       assert.deepEqual(fake.state.value.pages.map((item) => item.frame), frames);
     }
+  } finally { fake.restore(); }
+});
+
+test('legacy corners frames migrate to rounded in validation, JSON and drafts without mutating input', async () => {
+  const legacy = { ...createAlbum(), coverFrame: 'corners', pages: [page({ frame: 'corners', note: '  思い出の写真\n  ' }), page({ frame: 'white' }), page()] };
+  delete legacy.pages[2].frame;
+  const original = structuredClone(legacy);
+  const normalized = validateAlbum(legacy);
+  assert.equal(normalized.schemaVersion, 1);
+  assert.equal(normalized.coverFrame, 'rounded');
+  assert.deepEqual(normalized.pages.map((item) => item.frame), ['rounded', 'white', 'none']);
+  assert.equal(normalized.pages[0].note, legacy.pages[0].note);
+  assert.deepEqual(JSON.parse(serializeAlbum(legacy)), normalized);
+  assert.deepEqual(legacy, original);
+  const fake = installFakeIndexedDB({ value: legacy });
+  try {
+    assert.deepEqual(await loadDraft(), normalized);
+    assert.deepEqual(legacy, original);
+    assert.deepEqual(await saveDraft(legacy), normalized);
+    assert.equal(fake.state.value.coverFrame, 'rounded');
+    assert.deepEqual(fake.state.value.pages.map((item) => item.frame), ['rounded', 'white', 'none']);
+    assert.deepEqual(await loadDraft(), normalized);
+    assert.deepEqual(legacy, original);
   } finally { fake.restore(); }
 });
 

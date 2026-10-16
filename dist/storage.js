@@ -8,7 +8,7 @@ const DEFAULT_BACKGROUND_OPACITY = 0.22;
 const THEMES = new Set(['linen', 'sky', 'rose', 'plain']);
 const FONTS = new Set(['serif', 'sans', 'rounded']);
 const FITS = new Set(['contain', 'cover']);
-const FRAMES = new Set(['none', 'white', 'polaroid', 'corners']);
+const FRAMES = new Set(['none', 'white', 'polaroid', 'rounded']);
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
 const MAX_VALIDATED_IMAGES = 128;
 // Image strings are immutable. Reuse successful checks while editing album text,
@@ -57,6 +57,10 @@ function boundedString(value, maximum, label, minimum = 0) {
 function enumValue(value, values, label) {
   if (!values.has(value)) throw invalid(`${label}が正しくありません。`);
   return value;
+}
+
+function frameValue(value, label) {
+  return enumValue(value === 'corners' ? 'rounded' : value, FRAMES, label);
 }
 
 function backgroundOpacity(value) {
@@ -294,7 +298,7 @@ export function validateAlbum(candidate) {
       date: dateValue(own(page, 'date', '写真の日付')),
       note: boundedString(own(page, 'note', 'ひとこと'), 300, 'ひとこと'),
       fit: enumValue(own(page, 'fit', '写真の表示方法'), FITS, '写真の表示方法'),
-      frame: enumValue(optionalOwn(page, 'frame', '写真のフレーム', 'none'), FRAMES, '写真のフレーム'),
+      frame: frameValue(optionalOwn(page, 'frame', '写真のフレーム', 'none'), '写真のフレーム'),
     };
   });
   return {
@@ -307,7 +311,7 @@ export function validateAlbum(candidate) {
     coverImage: imageValue(own(album, 'coverImage', '表紙の写真')),
     coverImageName: boundedString(own(album, 'coverImageName', '表紙の写真の名前'), 260, '表紙の写真の名前'),
     coverFit: enumValue(own(album, 'coverFit', '表紙の表示方法'), FITS, '表紙の表示方法'),
-    coverFrame: enumValue(optionalOwn(album, 'coverFrame', '表紙のフレーム', 'none'), FRAMES, '表紙のフレーム'),
+    coverFrame: frameValue(optionalOwn(album, 'coverFrame', '表紙のフレーム', 'none'), '表紙のフレーム'),
     backgroundImage: imageValue(optionalOwn(album, 'backgroundImage', '背景の写真', null)),
     backgroundImageName: boundedString(optionalOwn(album, 'backgroundImageName', '背景の写真の名前', ''), 260, '背景の写真の名前'),
     backgroundOpacity: backgroundOpacity(optionalOwn(album, 'backgroundOpacity', '背景の濃さ', DEFAULT_BACKGROUND_OPACITY)),

@@ -219,6 +219,23 @@ function emptyPhoto(ctx, box, theme) {
   ctx.restore();
 }
 
+function roundedPath(ctx, box, radius) {
+  const r = Math.max(0, Math.min(radius, box.width / 2, box.height / 2));
+  const right = box.x + box.width;
+  const bottom = box.y + box.height;
+  ctx.beginPath();
+  ctx.moveTo(box.x + r, box.y);
+  ctx.lineTo(right - r, box.y);
+  ctx.quadraticCurveTo(right, box.y, right, box.y + r);
+  ctx.lineTo(right, bottom - r);
+  ctx.quadraticCurveTo(right, bottom, right - r, bottom);
+  ctx.lineTo(box.x + r, bottom);
+  ctx.quadraticCurveTo(box.x, bottom, box.x, bottom - r);
+  ctx.lineTo(box.x, box.y + r);
+  ctx.quadraticCurveTo(box.x, box.y, box.x + r, box.y);
+  ctx.closePath();
+}
+
 function drawFramedPhoto(ctx, image, box, fit, theme, frame) {
   const border = frame === 'polaroid' ? 26 : 22;
   const bottom = frame === 'polaroid' ? 86 : border;
@@ -235,8 +252,9 @@ function drawFramedPhoto(ctx, image, box, fit, theme, frame) {
   const width = imageWidth * scale;
   const height = imageHeight * scale;
   const drawing = { x: inner.x + (inner.width - width) / 2, y: inner.y + (inner.height - height) / 2, width, height };
-  // Cover clips only the photo; contain keeps every image edge visible.
+  // Fitting stays rectangular; rounded frames clip only the corner portions.
   const photo = fit === 'cover' ? inner : drawing;
+  const radius = Math.min(38, photo.width / 4, photo.height / 4);
   ctx.save();
   ctx.beginPath();
   ctx.rect(box.x, box.y, box.width, box.height);
@@ -247,38 +265,24 @@ function drawFramedPhoto(ctx, image, box, fit, theme, frame) {
   ctx.shadowColor = 'rgba(43, 38, 27, 0.12)';
   ctx.shadowBlur = 10;
   ctx.shadowOffsetY = 3;
-  if (frame === 'corners') {
-    const length = Math.max(2, Math.min(44, photo.width / 3, photo.height / 3));
-    // L-shaped paper tabs stay outside the image, including its four corners.
-    for (const [x, y, directionX, directionY] of [
-      [photo.x, photo.y, 1, 1], [photo.x + photo.width, photo.y, -1, 1],
-      [photo.x, photo.y + photo.height, 1, -1], [photo.x + photo.width, photo.y + photo.height, -1, -1],
-    ]) {
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.scale(directionX, directionY);
-      ctx.beginPath();
-      ctx.moveTo(-18, -18);
-      ctx.lineTo(length, -18);
-      ctx.lineTo(length, -6);
-      ctx.lineTo(-6, -6);
-      ctx.lineTo(-6, length);
-      ctx.lineTo(-18, length);
-      ctx.closePath();
-      ctx.fill();
-      ctx.shadowColor = 'transparent';
-      ctx.stroke();
-      ctx.restore();
-    }
+  const outer = { x: photo.x - border, y: photo.y - border, width: photo.width + border * 2, height: photo.height + border + bottom };
+  if (frame === 'rounded') {
+    roundedPath(ctx, outer, radius + border);
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+    roundedPath(ctx, { x: outer.x + 0.6, y: outer.y + 0.6, width: outer.width - 1.2, height: outer.height - 1.2 }, radius + border - 0.6);
+    ctx.stroke();
   } else {
-    const outer = { x: photo.x - border, y: photo.y - border, width: photo.width + border * 2, height: photo.height + border + bottom };
     ctx.fillRect(outer.x, outer.y, outer.width, outer.height);
     ctx.shadowColor = 'transparent';
     ctx.strokeRect(outer.x + 0.6, outer.y + 0.6, outer.width - 1.2, outer.height - 1.2);
   }
   ctx.shadowColor = 'transparent';
-  ctx.beginPath();
-  ctx.rect(photo.x, photo.y, photo.width, photo.height);
+  if (frame === 'rounded') roundedPath(ctx, photo, radius);
+  else {
+    ctx.beginPath();
+    ctx.rect(photo.x, photo.y, photo.width, photo.height);
+  }
   ctx.clip();
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
@@ -291,7 +295,8 @@ function drawPhoto(ctx, image, box, fit, theme, frame = 'none') {
     emptyPhoto(ctx, box, theme);
     return;
   }
-  if (frame === 'white' || frame === 'polaroid' || frame === 'corners') {
+  if (frame === 'corners') frame = 'rounded';
+  if (frame === 'white' || frame === 'polaroid' || frame === 'rounded') {
     drawFramedPhoto(ctx, image, box, fit, theme, frame);
     return;
   }
