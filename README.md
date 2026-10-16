@@ -54,6 +54,12 @@
 
 同梱書体: Copyright 2016 The Rounded M+ Project Authors. / SIL Open Font License 1.1。フォントとライセンスは [`dist/fonts/`](dist/fonts/) にあります。[Google Fontsの原本](https://github.com/google/fonts/blob/main/ofl/mplusrounded1c/MPLUSRounded1c-Regular.ttf)（Git blob `a66978b6a6f55de71105a37f8de702ab3f31d27d`）を、字形・収録文字・名称を保ったままFontTools 4.61.1でWOFF2へ変換しています。[ライセンス原文](https://github.com/fontsource/font-files/blob/main/fonts/google/m-plus-rounded-1c/LICENSE)。
 
+## プライバシーポリシー
+
+[`dist/privacy.html`](dist/privacy.html) を `/privacy.html` で公開し、編集画面・本棚・読書画面から新しいタブで開けます。JavaScriptなしでも本文を読めます。
+
+写真・文章・本棚はブラウザ内で処理・保存し、サーバーへアップロードしません。サイト配信に伴うVercelのアクセス情報、IndexedDBの保存範囲、編集データの書き出し、サイトデータの削除方法、公開リポジトリへの問い合わせ方法を説明しています。通信・保存・解析などの機能を変える場合は、本文と最終更新日も合わせて見直してください。
+
 ## Vercelに公開する
 
 VercelでGitHubリポジトリ `soramusubi-ctrl/omoideparapara` をImportし、次の設定でDeployします。
