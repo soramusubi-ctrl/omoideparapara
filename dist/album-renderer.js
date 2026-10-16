@@ -219,9 +219,80 @@ function emptyPhoto(ctx, box, theme) {
   ctx.restore();
 }
 
-function drawPhoto(ctx, image, box, fit, theme) {
+function drawFramedPhoto(ctx, image, box, fit, theme, frame) {
+  const border = frame === 'polaroid' ? 26 : 22;
+  const bottom = frame === 'polaroid' ? 86 : border;
+  const safety = 10;
+  const inner = {
+    x: box.x + safety + border, y: box.y + safety + border,
+    width: box.width - 2 * (safety + border), height: box.height - 2 * safety - border - bottom,
+  };
+  const imageWidth = image.naturalWidth || image.width;
+  const imageHeight = image.naturalHeight || image.height;
+  const scale = fit === 'cover'
+    ? Math.max(inner.width / imageWidth, inner.height / imageHeight)
+    : Math.min(inner.width / imageWidth, inner.height / imageHeight);
+  const width = imageWidth * scale;
+  const height = imageHeight * scale;
+  const drawing = { x: inner.x + (inner.width - width) / 2, y: inner.y + (inner.height - height) / 2, width, height };
+  // Cover clips only the photo; contain keeps every image edge visible.
+  const photo = fit === 'cover' ? inner : drawing;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(box.x, box.y, box.width, box.height);
+  ctx.clip();
+  ctx.fillStyle = theme === THEMES.plain ? '#FFFFFF' : '#FFFEFA';
+  ctx.strokeStyle = theme === THEMES.plain ? '#DEDDD8' : theme.line;
+  ctx.lineWidth = 1.2;
+  ctx.shadowColor = 'rgba(43, 38, 27, 0.12)';
+  ctx.shadowBlur = 10;
+  ctx.shadowOffsetY = 3;
+  if (frame === 'corners') {
+    const length = Math.max(2, Math.min(44, photo.width / 3, photo.height / 3));
+    // L-shaped paper tabs stay outside the image, including its four corners.
+    for (const [x, y, directionX, directionY] of [
+      [photo.x, photo.y, 1, 1], [photo.x + photo.width, photo.y, -1, 1],
+      [photo.x, photo.y + photo.height, 1, -1], [photo.x + photo.width, photo.y + photo.height, -1, -1],
+    ]) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(directionX, directionY);
+      ctx.beginPath();
+      ctx.moveTo(-18, -18);
+      ctx.lineTo(length, -18);
+      ctx.lineTo(length, -6);
+      ctx.lineTo(-6, -6);
+      ctx.lineTo(-6, length);
+      ctx.lineTo(-18, length);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowColor = 'transparent';
+      ctx.stroke();
+      ctx.restore();
+    }
+  } else {
+    const outer = { x: photo.x - border, y: photo.y - border, width: photo.width + border * 2, height: photo.height + border + bottom };
+    ctx.fillRect(outer.x, outer.y, outer.width, outer.height);
+    ctx.shadowColor = 'transparent';
+    ctx.strokeRect(outer.x + 0.6, outer.y + 0.6, outer.width - 1.2, outer.height - 1.2);
+  }
+  ctx.shadowColor = 'transparent';
+  ctx.beginPath();
+  ctx.rect(photo.x, photo.y, photo.width, photo.height);
+  ctx.clip();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(image, drawing.x, drawing.y, drawing.width, drawing.height);
+  ctx.restore();
+}
+
+function drawPhoto(ctx, image, box, fit, theme, frame = 'none') {
   if (!image) {
     emptyPhoto(ctx, box, theme);
+    return;
+  }
+  if (frame === 'white' || frame === 'polaroid' || frame === 'corners') {
+    drawFramedPhoto(ctx, image, box, fit, theme, frame);
     return;
   }
   const imageWidth = image.naturalWidth || image.width;
@@ -313,7 +384,7 @@ export async function renderAlbumPage(canvas, album, index = 0) {
     drawText(ctx, titleLayout, PAGE_WIDTH / 2, titleTop, theme.ink, 'center');
     drawText(ctx, subtitleLayout, PAGE_WIDTH / 2, subtitleTop, background ? theme.ink : theme.muted, 'center');
     const photoTop = Math.max(508, subtitleTop + subtitleLayout.height + 58);
-    drawPhoto(ctx, image, { x: 114, y: photoTop, width: 1012, height: 1530 - photoTop }, album.coverFit, theme);
+    drawPhoto(ctx, image, { x: 114, y: photoTop, width: 1012, height: 1530 - photoTop }, album.coverFit, theme, album.coverFrame);
   } else {
     const note = limitedText(item.note, 300);
     const date = limitedText(item.date, 32);
@@ -325,7 +396,7 @@ export async function renderAlbumPage(canvas, album, index = 0) {
     const detailsHeight = dateHeight + dateNoteGap + noteLayout.height;
     const photoBottom = detailsHeight ? 1566 - detailsHeight - 58 : 1518;
     if (theme !== THEMES.plain) line(ctx, 114, 112, 180, 112, theme.accent, 2);
-    drawPhoto(ctx, image, { x: 114, y: 164, width: 1012, height: photoBottom - 164 }, item.fit, theme);
+    drawPhoto(ctx, image, { x: 114, y: 164, width: 1012, height: photoBottom - 164 }, item.fit, theme, item.frame);
     let textTop = photoBottom + 58;
     if (background && detailsHeight) {
       textPanel(ctx, { x: 88, y: textTop - 20, width: 1064, height: detailsHeight + 40 }, theme);

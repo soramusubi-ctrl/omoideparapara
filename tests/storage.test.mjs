@@ -12,7 +12,7 @@ const images = {
 };
 
 function page(overrides = {}) {
-  return { id: makeId(), image: null, imageName: '', date: '', note: '', fit: 'contain', ...overrides };
+  return { id: makeId(), image: null, imageName: '', date: '', note: '', fit: 'contain', frame: 'none', ...overrides };
 }
 
 function albumWithImage(value) {
@@ -27,6 +27,7 @@ test('new album has independent valid empty defaults', () => {
   assert.equal(first.theme, 'linen');
   assert.equal(first.font, 'serif');
   assert.equal(first.coverImage, null);
+  assert.equal(first.coverFrame, 'none');
   assert.equal(first.backgroundImage, null);
   assert.equal(first.backgroundImageName, '');
   assert.equal(first.backgroundOpacity, 0.22);
@@ -34,6 +35,42 @@ test('new album has independent valid empty defaults', () => {
   assert.notEqual(first.id, second.id);
   assert.notEqual(first.pages, second.pages);
   assert.deepEqual(validateAlbum(first), first);
+});
+
+test('legacy version-one albums normalize missing cover and page frames without changing source content', () => {
+  const legacy = { ...createAlbum(), pages: [page({ note: '  大切な写真\nそのまま  ' }), page({ frame: 'corners' })] };
+  delete legacy.coverFrame;
+  delete legacy.pages[0].frame;
+  const normalized = validateAlbum(legacy);
+  assert.equal(normalized.schemaVersion, 1);
+  assert.equal(normalized.coverFrame, 'none');
+  assert.equal(normalized.pages[0].frame, 'none');
+  assert.equal(normalized.pages[1].frame, 'corners');
+  assert.equal(normalized.pages[0].note, legacy.pages[0].note);
+  assert.equal(Object.hasOwn(legacy, 'coverFrame'), false);
+  assert.equal(Object.hasOwn(legacy.pages[0], 'frame'), false);
+  assert.deepEqual(JSON.parse(serializeAlbum(legacy)), normalized);
+});
+
+test('cover and page frames require exact supported values and reject accessors without invoking them', () => {
+  for (const frame of ['none', 'white', 'polaroid', 'corners']) {
+    const normalized = validateAlbum({ ...createAlbum(), coverFrame: frame, pages: [page({ frame })] });
+    assert.equal(normalized.coverFrame, frame);
+    assert.equal(normalized.pages[0].frame, frame);
+  }
+  for (const frame of [undefined, null, '', 'White', ' white ', 'unknown', 'constructor', true, 1, {}, [], new String('white')]) {
+    assert.throws(() => validateAlbum({ ...createAlbum(), coverFrame: frame }), /表紙のフレーム/);
+    assert.throws(() => validateAlbum({ ...createAlbum(), pages: [page({ frame })] }), /写真のフレーム/);
+  }
+  for (const isCover of [true, false]) {
+    const album = { ...createAlbum(), pages: [page()] };
+    let invoked = false;
+    Object.defineProperty(isCover ? album : album.pages[0], isCover ? 'coverFrame' : 'frame', {
+      get() { invoked = true; return 'white'; },
+    });
+    assert.throws(() => validateAlbum(album), /フレーム/);
+    assert.equal(invoked, false);
+  }
 });
 
 test('legacy version-one albums default to serif without changing source data or text', () => {
@@ -272,12 +309,30 @@ test('each supported font survives JSON and draft save/load roundtrips', async (
   } finally { fake.restore(); }
 });
 
-test('legacy draft records gain background and font defaults when loaded and saved', async () => {
-  const legacy = createAlbum();
+test('independent cover and page frames survive JSON and draft save/load roundtrips', async () => {
+  const fake = installFakeIndexedDB();
+  const frames = ['none', 'white', 'polaroid', 'corners'];
+  try {
+    for (const coverFrame of frames) {
+      const album = { ...createAlbum(), coverFrame, pages: frames.map((frame) => page({ frame })) };
+      const imported = validateAlbum(JSON.parse(serializeAlbum(album)));
+      assert.deepEqual(imported, album);
+      assert.deepEqual(await saveDraft(imported), album);
+      assert.deepEqual(await loadDraft(), album);
+      assert.equal(fake.state.value.coverFrame, coverFrame);
+      assert.deepEqual(fake.state.value.pages.map((item) => item.frame), frames);
+    }
+  } finally { fake.restore(); }
+});
+
+test('legacy draft records gain background, font and frame defaults when loaded and saved', async () => {
+  const legacy = { ...createAlbum(), pages: [page()] };
   delete legacy.backgroundImage;
   delete legacy.backgroundImageName;
   delete legacy.backgroundOpacity;
   delete legacy.font;
+  delete legacy.coverFrame;
+  delete legacy.pages[0].frame;
   const fake = installFakeIndexedDB({ value: legacy });
   try {
     const loaded = await loadDraft();
@@ -286,6 +341,8 @@ test('legacy draft records gain background and font defaults when loaded and sav
     assert.equal(loaded.backgroundImageName, '');
     assert.equal(loaded.backgroundOpacity, 0.22);
     assert.equal(loaded.font, 'serif');
+    assert.equal(loaded.coverFrame, 'none');
+    assert.equal(loaded.pages[0].frame, 'none');
     await saveDraft(loaded);
     assert.deepEqual(fake.state.value, loaded);
   } finally { fake.restore(); }
@@ -321,6 +378,8 @@ test('denied IDB, blocked connections and corrupted drafts never masquerade as a
     { blocked: true },
     { value: { broken: true } },
     { value: { ...createAlbum(), font: 'invalid' } },
+    { value: { ...createAlbum(), coverFrame: 'invalid' } },
+    { value: { ...createAlbum(), pages: [page({ frame: 'invalid' })] } },
   ]) {
     const fake = installFakeIndexedDB(options);
     try {

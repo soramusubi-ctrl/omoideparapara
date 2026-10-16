@@ -3,6 +3,13 @@ import { PAGE_WIDTH, PAGE_HEIGHT, renderAlbumPage, downloadPdf, downloadPng, dow
 import { MAX_PROJECT_BYTES, assertProjectBudget } from './album-limits.js';
 import { FONT_OPTIONS } from './album-fonts.js';
 
+const FRAME_OPTIONS = Object.freeze([
+  { value: 'none', label: '枠なし' },
+  { value: 'white', label: '白ふち' },
+  { value: 'polaroid', label: 'ポラロイド風' },
+  { value: 'corners', label: '写真コーナー' }
+]);
+
 const $ = (selector) => document.querySelector(selector);
 const icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
@@ -106,6 +113,7 @@ function renderEditor() {
   const image = isCover ? album.coverImage : page.image;
   const imageName = isCover ? album.coverImageName : page.imageName;
   const fit = isCover ? album.coverFit : page.fit;
+  const frame = (isCover ? album.coverFrame : page.frame) || 'none';
   $('#editor-heading').innerHTML = `<span class="editor-index">${isCover ? 'COVER' : `PAGE ${String(selected).padStart(2, '0')}`}</span><h2>${isCover ? '表紙をつくる' : '思い出を綴る'}</h2><p>${isCover ? '最初の一枚に、あなたらしいタイトルを。' : 'この一枚に、日付とひとことを添えて。'}</p>`;
   $('#editor-form').innerHTML = `
     <div class="field"><span class="field-label">${isCover ? '表紙の画像' : 'ページの画像'}</span>
@@ -117,6 +125,7 @@ function renderEditor() {
     <div class="field"><label for="album-subtitle">サブタイトル<span class="optional">任意</span></label><textarea id="album-subtitle" name="subtitle" data-field="subtitle" maxlength="180" rows="2" placeholder="旅先や、いっしょに過ごした人の名前など">${escape(album.subtitle)}</textarea></div>` : `<div class="field"><label for="page-date">日付<span class="optional">任意</span></label><div class="date-control"><input type="date" id="page-date" name="date" data-field="date" value="${escape(page.date)}" min="0001-01-01" max="9999-12-31" aria-describedby="date-help"><button type="button" class="date-none" data-action="clear-date" aria-pressed="${!page.date}">日付なし</button></div><p class="field-help" id="date-help">「日付なし」を選ぶと、日付を印字せずに保存します。</p></div>
     <div class="field"><label for="page-note">ひとこと<span class="optional">任意</span></label><textarea id="page-note" name="note" data-field="note" maxlength="300" rows="4" placeholder="このとき、みんなで笑ったね。">${escape(page.note)}</textarea><div class="field-footer"><span>書かなくても大丈夫</span><span data-count="note">${page.note.length} / 300</span></div></div>`}
     <div class="field"><span class="field-label">画像の見せ方</span><div class="segments" role="group" aria-label="画像の見せ方"><button type="button" data-action="fit-contain" aria-pressed="${fit === 'contain'}">全体を入れる</button><button type="button" data-action="fit-cover" aria-pressed="${fit === 'cover'}">枠いっぱい</button></div><p class="field-help">「全体を入れる」なら、画像の端まで残せます。</p></div>
+    <div class="field"><span class="field-label">写真の枠<span class="optional">この${isCover ? '表紙' : 'ページ'}</span></span><div class="frame-options" role="group" aria-label="${isCover ? '表紙' : 'このページ'}の写真の枠">${FRAME_OPTIONS.map(({ value, label }) => `<button type="button" class="frame-option" data-action="frame" data-frame="${value}" aria-pressed="${frame === value}"><span class="frame-preview frame-preview-${value}" aria-hidden="true"><span class="frame-preview-photo"></span>${value === 'corners' ? '<i></i><i></i><i></i><i></i>' : ''}</span><span>${label}</span></button>`).join('')}</div><p class="field-help">写真ごとに選べます。PDF・PNGにも反映します。</p></div>
     <div class="field"><span class="field-label">文字のフォント<span class="optional">全ページ共通</span></span><div class="font-options" role="group" aria-label="アルバムのフォント">${FONT_OPTIONS.map(({ value, label, family }) => `<button type="button" class="font-option" data-action="font" data-font="${value}" aria-pressed="${album.font === value}"><span class="font-preview" style="font-family:${escape(family)}">あいうえお</span><span>${label}</span></button>`).join('')}</div><p class="field-help">タイトル・日付・ひとことに反映します。</p></div>
     <div class="field theme-field"><span class="field-label">アルバムの色・背景<span class="optional">全ページ共通</span></span><div class="theme-options" role="group" aria-label="紙と文字の色">${[['linen', 'きなり', '#ede5d3'], ['sky', '空色', '#dcebf0'], ['rose', 'さくら', '#f1dfe0'], ['plain', '背景なし（白）', '#ffffff']].map(([value, label, color]) => `<button type="button" class="theme-option" data-action="theme" data-theme="${value}" aria-pressed="${album.theme === value}"><span class="theme-swatch" style="--swatch:${color}"></span>${label}</button>`).join('')}</div>
       ${album.theme === 'plain' ? `<p class="field-help">印刷向けの白い台紙です。背景画像や台紙の色・飾りを表示しません。${album.backgroundImage ? '背景画像は残っています。ほかの色を選ぶと戻せます。' : 'ほかの色を選ぶと、背景画像も設定できます。'}</p>` : `<button type="button" class="background-picker ${album.backgroundImage ? 'has-background' : ''}" data-action="choose-background" aria-label="背景画像を${album.backgroundImage ? '差し替える' : '選ぶ'}">${album.backgroundImage ? `<img src="${escape(album.backgroundImage)}" alt=""><span><strong>背景画像を差し替える</strong><small>${escape(album.backgroundImageName || '選択した画像')}</small></span>` : `${icon('image')}<span><strong>背景画像を選ぶ</strong><small>好きな絵や模様を、アルバムの台紙に。</small></span>`}</button>
@@ -212,7 +221,7 @@ function progress(current, total, message) {
   $('#progress-message').textContent = message;
 }
 
-function newPage(image = null, imageName = '') { return { id: makeId(), image, imageName, date: '', note: '', fit: 'contain' }; }
+function newPage(image = null, imageName = '') { return { id: makeId(), image, imageName, date: '', note: '', fit: 'contain', frame: 'none' }; }
 
 async function addPhotos(files) {
   if (!files.length || busy) return;
@@ -364,6 +373,14 @@ async function handleAction(action, button) {
       album.font = button.dataset.font;
       commit({ full: true });
       document.querySelector(`[data-action="font"][data-font="${album.font}"]`)?.focus({ preventScroll: true });
+      break;
+    }
+    case 'frame': {
+      const frame = button.dataset.frame;
+      if (!FRAME_OPTIONS.some((option) => option.value === frame)) break;
+      if (selected === 0) album.coverFrame = frame; else selectedPage().frame = frame;
+      commit({ full: true });
+      document.querySelector(`[data-action="frame"][data-frame="${frame}"]`)?.focus({ preventScroll: true });
       break;
     }
     case 'clear-date': {

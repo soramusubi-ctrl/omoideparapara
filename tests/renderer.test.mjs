@@ -33,6 +33,7 @@ function instrumentedCanvas() {
   const images = [];
   const fills = [];
   const measurements = [];
+  const rectangles = [];
   const proxy = new Proxy(base, {
     get(target, property) {
       if (property === 'fillText') return (value, x, y) => {
@@ -51,13 +52,17 @@ function instrumentedCanvas() {
         measurements.push({ value, font: target.font });
         return target.measureText(value);
       };
+      if (property === 'rect') return (...args) => {
+        rectangles.push(args);
+        return target.rect(...args);
+      };
       const value = Reflect.get(target, property, target);
       return typeof value === 'function' ? value.bind(target) : value;
     },
     set(target, property, value) { return Reflect.set(target, property, value, target); },
   });
   canvas.getContext = () => proxy;
-  return { canvas, text, images, fills, measurements };
+  return { canvas, text, images, fills, measurements, rectangles };
 }
 
 function solidImage(color, width = 10, height = 10) {
@@ -380,6 +385,116 @@ test('font choices reach every text role, change output, and preserve the defaul
   }
 });
 
+test('missing and none frames retain original pixels, including empty photos and backgrounds', { skip: !canvasModule }, async () => {
+  globalThis.Image = canvasModule.Image;
+  const photo = solidImage('#4a94bc', 200, 300);
+  const backgroundImage = solidImage('#d8b9b0');
+  for (const theme of Object.keys(THEMES)) for (const index of [0, 1]) {
+    for (const image of [photo, null]) {
+      const baselineAlbum = { ...album, theme, coverImage: image, backgroundImage, backgroundOpacity: 0.6, pages: [{ ...album.pages[0], image }] };
+      const baseline = instrumentedCanvas();
+      await renderAlbumPage(baseline.canvas, baselineAlbum, index);
+      const baselinePng = baseline.canvas.toBuffer('image/png');
+      for (const frame of image ? ['none'] : ['none', 'white', 'polaroid', 'corners']) {
+        const framed = instrumentedCanvas();
+        await renderAlbumPage(framed.canvas, { ...baselineAlbum, coverFrame: frame, pages: baselineAlbum.pages.map(page => ({ ...page, frame })) }, index);
+        assert.deepEqual(framed.canvas.toBuffer('image/png'), baselinePng, `${theme} page ${index}: ${frame}`);
+      }
+    }
+  }
+});
+
+test('all contain frames preserve portrait and panorama image corners on cover and interior', { skip: !canvasModule }, async () => {
+  globalThis.Image = canvasModule.Image;
+  for (const [width, height] of [[400, 200], [200, 400], [1600, 60], [60, 1600]]) {
+    const source = canvasModule.createCanvas(width, height);
+    const ctx = source.getContext('2d');
+    ctx.fillStyle = '#d8b76c'; ctx.fillRect(0, 0, width, height);
+    const colors = ['#ff0000', '#00ff00', '#0000ff', '#ff00ff'];
+    for (const [corner, color] of colors.entries()) {
+      ctx.fillStyle = color;
+      ctx.fillRect(corner % 2 ? width * 0.75 : 0, corner > 1 ? height * 0.75 : 0, width * 0.25, height * 0.25);
+    }
+    const image = source.toDataURL();
+    for (const frame of ['none', 'white', 'polaroid', 'corners']) for (const index of [0, 1]) {
+      const record = instrumentedCanvas();
+      await renderAlbumPage(record.canvas, { ...album, theme: 'plain', coverImage: image, coverFit: 'contain', coverFrame: frame, pages: [{ image, fit: 'contain', frame, note: '', date: '' }] }, index);
+      const [, x, y, photoWidth, photoHeight] = record.images[0].args;
+      for (const [corner, expected] of [[0, [255, 0, 0]], [1, [0, 255, 0]], [2, [0, 0, 255]], [3, [255, 0, 255]]]) {
+        const sample = rgbAt(record.canvas, Math.floor(x + photoWidth * (corner % 2 ? 0.92 : 0.08)), Math.floor(y + photoHeight * (corner > 1 ? 0.92 : 0.08)));
+        assert.deepEqual(sample, expected, `${frame} ${width}×${height}, page ${index}, corner ${corner}`);
+      }
+      if (frame !== 'none') {
+        const [boxX, boxY, boxWidth, boxHeight] = record.rectangles[0];
+        assert.ok(x > boxX && y > boxY && x + photoWidth < boxX + boxWidth && y + photoHeight < boxY + boxHeight);
+        const tab = frame === 'corners' ? rgbAt(record.canvas, Math.floor(x - 12), Math.floor(y - 12)) : null;
+        if (tab) assert.deepEqual(tab, [255, 255, 255]);
+      }
+    }
+  }
+});
+
+test('frames stay inside the original photo box and never change metadata or the background', { skip: !canvasModule }, async () => {
+  globalThis.Image = canvasModule.Image;
+  const image = solidImage('#5788af', 1200, 350);
+  const backgroundImage = solidImage('#d4b9d0');
+  const longAlbum = {
+    ...album, font: 'rounded', title: '大切な日々の記録。'.repeat(16).slice(0, 120), subtitle: '何気ない毎日を、ずっと大切に。'.repeat(12).slice(0, 180),
+    coverImage: image, backgroundImage, backgroundOpacity: 0.7,
+    pages: [{ image, date: '2026-10-16', note: 'いつもの小道をお散歩。風に揺れる葉っぱを見つけて、みんなで笑いました。'.repeat(10).slice(0, 300), fit: 'contain' }],
+  };
+  for (const index of [0, 1]) {
+    const baseline = instrumentedCanvas();
+    await renderAlbumPage(baseline.canvas, longAlbum, index);
+    const [x, y, width, height] = baseline.rectangles.at(-1);
+    const baselinePixels = baseline.canvas.getContext('2d').getImageData(0, 0, PAGE_WIDTH, PAGE_HEIGHT).data;
+    for (const frame of ['white', 'polaroid', 'corners']) {
+      const framed = instrumentedCanvas();
+      await renderAlbumPage(framed.canvas, { ...longAlbum, coverFrame: frame, pages: longAlbum.pages.map(page => ({ ...page, frame })) }, index);
+      assert.deepEqual(framed.text, baseline.text);
+      assert.deepEqual(framed.images[0].args.slice(1), baseline.images[0].args.slice(1), 'Background must not receive a frame.');
+      const pixels = framed.canvas.getContext('2d').getImageData(0, 0, PAGE_WIDTH, PAGE_HEIGHT).data;
+      let changes = 0;
+      for (let offset = 0; offset < pixels.length; offset += 4) {
+        const px = (offset / 4) % PAGE_WIDTH;
+        const py = Math.floor(offset / 4 / PAGE_WIDTH);
+        for (let channel = 0; channel < 4; channel += 1) {
+          if (pixels[offset + channel] !== baselinePixels[offset + channel]) {
+            assert.ok(px >= Math.floor(x) && px <= Math.ceil(x + width) && py >= Math.floor(y) && py <= Math.ceil(y + height), `${frame} paints outside the photo box at ${px},${py}`);
+            changes += 1;
+          }
+        }
+      }
+      assert.ok(changes > 0);
+    }
+  }
+});
+
+test('cover-fit frames clip photo pixels inside paper borders and polaroid has extra lower paper', { skip: !canvasModule }, async () => {
+  globalThis.Image = canvasModule.Image;
+  const image = solidImage('#2577bc', 100, 300);
+  for (const frame of ['white', 'polaroid', 'corners']) {
+    const record = instrumentedCanvas();
+    await renderAlbumPage(record.canvas, { ...album, theme: 'plain', pages: [{ image, fit: 'cover', frame, date: '', note: '' }] }, 1);
+    const [x, y, width, height] = record.rectangles.at(-1);
+    const [, drawX, drawY, drawWidth, drawHeight] = record.images[0].args;
+    assert.ok(drawWidth >= width && drawHeight >= height);
+    assert.ok(drawX <= x && drawY <= y);
+    assert.deepEqual(rgbAt(record.canvas, x + width / 2, y + height / 2), [37, 119, 188]);
+    if (frame === 'corners') {
+      assert.deepEqual(rgbAt(record.canvas, x + 2, y + 2), [37, 119, 188]);
+    } else {
+      const outer = record.fills.at(-1).args;
+      const top = y - outer[1];
+      const bottom = outer[1] + outer[3] - y - height;
+      assert.deepEqual(rgbAt(record.canvas, x + width / 2, y - 8), [255, 255, 255]);
+      assert.deepEqual(rgbAt(record.canvas, x + width / 2, y + height + 8), [255, 255, 255]);
+      if (frame === 'polaroid') assert.ok(bottom > top * 3);
+      else assert.ok(Math.abs(bottom - top) < 0.01);
+    }
+  }
+});
+
 test('font readiness is awaited, cached per family, and extended for newly edited glyphs', { skip: !canvasModule }, async () => {
   globalThis.Image = canvasModule.Image;
   const previousDocument = globalThis.document;
@@ -523,6 +638,30 @@ test('browser download APIs produce actual PNG and all album pages in a PDF', { 
     assert.ok(fontLoads.every(specification => specification.endsWith(getAlbumFont('rounded'))));
     assert.deepEqual(progress, [{ current: 1, total: 3 }, { current: 2, total: 3 }, { current: 3, total: 3 }]);
     assert.deepEqual(downloads, ['あの日の小さな思い出-02.png', 'あの日の小さな思い出.pdf']);
+
+    const photo = solidImage('#348bb2', 600, 250);
+    const framedAlbum = {
+      ...exportAlbum, coverImage: photo, coverFrame: 'white',
+      pages: ['polaroid', 'corners'].map(frame => ({ image: photo, frame, fit: 'contain', date: '', note: '' })),
+    };
+    const framedPng = await downloadPng(framedAlbum, 1);
+    const pngImage = await canvasModule.loadImage(Buffer.from(await framedPng.arrayBuffer()));
+    const actualPng = canvasModule.createCanvas(PAGE_WIDTH, PAGE_HEIGHT);
+    actualPng.getContext('2d').drawImage(pngImage, 0, 0);
+    const preview = instrumentedCanvas();
+    await renderAlbumPage(preview.canvas, framedAlbum, 1);
+    assert.deepEqual(actualPng.getContext('2d').getImageData(0, 0, PAGE_WIDTH, PAGE_HEIGHT).data, preview.canvas.getContext('2d').getImageData(0, 0, PAGE_WIDTH, PAGE_HEIGHT).data, 'Framed PNG must match the preview pixel for pixel.');
+    const framedPdf = Buffer.from(await (await downloadPdf(framedAlbum)).arrayBuffer());
+    let framedPage = 0;
+    for (const match of framedPdf.toString('latin1').matchAll(/\/Subtype \/Image [\s\S]*?\/Length (\d+) >>\nstream\n/g)) {
+      const start = match.index + match[0].length;
+      const pagePreview = instrumentedCanvas();
+      await renderAlbumPage(pagePreview.canvas, framedAlbum, framedPage);
+      const expectedJpeg = await new Promise(resolve => pagePreview.canvas.toBlob(resolve, 'image/jpeg', 0.95));
+      assert.deepEqual(framedPdf.subarray(start, start + Number(match[1])), Buffer.from(await expectedJpeg.arrayBuffer()), `Framed PDF page ${framedPage} must embed the shared preview artwork.`);
+      framedPage += 1;
+    }
+    assert.equal(framedPage, 3);
   } finally {
     globalThis.document = previousDocument;
     globalThis.URL = previousURL;
