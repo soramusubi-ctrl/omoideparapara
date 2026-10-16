@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f8f6f0">
   <meta name="description" content="思い出のアルバムを、本のようにめくって読む。">
-  <title>アルバムを読む — おもひでパラパラだ</title>
+  <title>アルバムを読む — おもひでパラパラ</title>
   <link rel="stylesheet" href="./styles.css">
   <link rel="stylesheet" href="./reader.css">
   <link rel="stylesheet" href="./bookshelf.css">
@@ -13,7 +13,7 @@
 </head>
 <body class="book-page" data-page="book">
   <svg class="svg-defs" aria-hidden="true"><defs><symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol><symbol id="i-left" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></symbol><symbol id="i-right" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol></defs></svg>
-  <header class="app-header shelf-header"><a class="brand" href="./bookshelf.html"><span class="brand-mark"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 3h13a2 2 0 0 1 2 2v16H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3Zm2 0v14M3 18a2 2 0 0 1 2-2h15"/></svg></span><span><strong>おもひでパラパラだ</strong><small>思い出を、一冊に。</small></span></a><a class="button button-secondary" href="./bookshelf.html">本棚へ</a></header>
+  <header class="app-header shelf-header"><a class="brand" href="./bookshelf.html"><span class="brand-mark"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 3h13a2 2 0 0 1 2 2v16H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3Zm2 0v14M3 18a2 2 0 0 1 2-2h15"/></svg></span><span><strong>おもひでパラパラ</strong><small>思い出を、一冊に。</small></span></a><a class="button button-secondary" href="./bookshelf.html">本棚へ</a></header>
   <main class="book-landing"><section class="book-landing-inner" aria-labelledby="book-title"><div class="book-landing-cover"><p class="eyebrow">MEMORY BOOK</p><h1 id="book-title">アルバムを読む</h1><p id="book-subtitle">大切な思い出の一冊を、ここから。</p></div><p id="book-page-count" class="book-landing-meta"></p><p id="book-loading" class="book-load-message" role="status">本を読み込んでいます…</p><div class="book-landing-actions"><button type="button" id="book-read" class="button button-primary" hidden>もう一度読む</button><a class="button button-secondary" href="./bookshelf.html">本棚へ</a><a id="book-edit" class="button button-secondary" target="_blank" rel="noopener" hidden>編集する<span class="visually-hidden">（新しいタブ）</span></a></div><div id="book-error" class="shelf-notice shelf-error" role="alert" hidden><h2>この本を開けませんでした。</h2><p id="book-error-text"></p><button type="button" id="book-retry" class="button button-secondary">もう一度読み込む</button></div><p class="book-privacy"><a class="privacy-link" href="./privacy.html" target="_blank" rel="noopener">プライバシーポリシー<span class="visually-hidden">（新しいタブ）</span></a></p></section></main>
   <dialog id="book-dialog" class="reader-dialog" aria-modal="true" aria-labelledby="reader-title">
     <header class="reader-header"><div class="reader-heading"><span class="reader-kicker">MEMORY BOOK</span><h2 id="reader-title">アルバムを読む</h2></div><button type="button" class="button button-secondary reader-close" data-reader-action="close" autofocus><svg aria-hidden="true"><use href="#i-close"/></svg><span>表紙に戻る</span></button></header>
