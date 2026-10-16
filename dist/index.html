@@ -8,6 +8,7 @@
   <title>おもひでパラパラだ — 思い出を、一冊に。</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='9' y='5' width='46' height='54' rx='8' fill='%234b665b'/%3E%3Cpath d='M20 5v54' stroke='%23e9dbc3' stroke-width='3'/%3E%3Cpath d='M30 24h15M30 32h11' stroke='%23fff8e9' stroke-width='3'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./reader.css">
   <script type="module" src="./app.js"></script>
 </head>
 <body data-view="edit">
@@ -46,7 +47,7 @@
   <main class="app-main">
     <section class="intro" aria-labelledby="intro-heading">
       <div><p class="eyebrow">YOUR MEMORY BOOK</p><h1 id="intro-heading">好きな一枚を、<em>あなたの一冊に。</em></h1><p class="intro-copy">写真を選んで、日付とひとこと。小さな思い出を綴ろう。</p></div>
-      <div class="intro-actions"><button class="text-button" data-action="demo"><svg><use href="#i-spark"/></svg>見本から試してみる</button><button class="text-button muted" data-action="new-album">新しいアルバム</button></div>
+      <div class="intro-actions"><button class="button button-secondary read-book-button" type="button" data-action="read-book" aria-haspopup="dialog" aria-controls="book-dialog"><svg><use href="#i-book"/></svg>本をひらく</button><button class="text-button" data-action="demo"><svg><use href="#i-spark"/></svg>見本から試してみる</button><button class="text-button muted" data-action="new-album">新しいアルバム</button></div>
     </section>
 
     <p id="save-warning" class="save-warning" role="alert" hidden>自動保存を利用できません。「保存する」から編集データを端末に保存してください。</p>
@@ -95,5 +96,19 @@
   <dialog id="confirm-dialog" class="confirm-dialog"><h2 id="confirm-title"></h2><p id="confirm-copy"></p><div class="confirm-actions"><button class="button button-secondary" id="confirm-cancel">キャンセル</button><button class="button button-primary" id="confirm-ok">続ける</button></div></dialog>
   <dialog id="progress-dialog" class="progress-dialog"><span class="spinner"></span><h2 id="progress-title">準備しています</h2><p id="progress-message" role="status">少しお待ちください。</p><progress id="progress-bar" max="1" value="0"></progress></dialog>
   <dialog id="zoom-dialog" class="zoom-dialog"><div class="zoom-toolbar"><span id="zoom-title">プレビュー</span><button class="icon-button" data-action="close-zoom" aria-label="拡大プレビューを閉じる"><svg><use href="#i-close"/></svg></button></div><canvas id="zoom-canvas" width="1240" height="1754" role="img" aria-label="アルバムページの拡大プレビュー"></canvas></dialog>
+
+  <dialog id="book-dialog" class="reader-dialog" aria-modal="true" aria-labelledby="reader-title">
+    <header class="reader-header"><div class="reader-heading"><span class="reader-kicker">MEMORY BOOK</span><h2 id="reader-title">アルバムを読む</h2></div><button type="button" class="button button-secondary reader-close" data-reader-action="close" autofocus><svg aria-hidden="true"><use href="#i-close"/></svg><span>編集に戻る</span></button></header>
+    <div id="reader-stage" class="reader-stage" aria-label="アルバムのページ。左右の端を押すか、スワイプしてめくれます">
+      <div id="reader-book" class="reader-book" data-layout="single" data-cover="true">
+        <canvas id="reader-left" class="reader-paper reader-paper-left" width="1" height="1" role="img" aria-label="見開きの左ページ"></canvas>
+        <canvas id="reader-right" class="reader-paper reader-paper-right" width="1" height="1" role="img" aria-label="見開きの右ページ"></canvas>
+        <div id="reader-turn" class="reader-turn" aria-hidden="true" hidden><div class="reader-turn-face reader-turn-front"><canvas id="reader-turn-front" width="1" height="1"></canvas></div><div class="reader-turn-face reader-turn-back"><canvas id="reader-turn-back" width="1" height="1"></canvas></div></div>
+      </div>
+      <p id="reader-loading" class="reader-loading" role="status" hidden>ページを用意しています…</p>
+      <p id="reader-error" class="reader-error" role="alert" hidden></p>
+    </div>
+    <footer class="reader-footer"><nav class="reader-controls" aria-label="本のページ移動"><button type="button" id="reader-first" class="text-button reader-jump" data-reader-action="first">表紙へ</button><button type="button" id="reader-prev" class="button button-secondary reader-arrow" data-reader-action="previous" aria-label="前のページへめくる"><svg aria-hidden="true"><use href="#i-left"/></svg><span>前へ</span></button><span id="reader-position" class="reader-position" role="status" aria-live="polite" aria-atomic="true">表紙</span><button type="button" id="reader-next" class="button button-secondary reader-arrow" data-reader-action="next" aria-label="次のページへめくる"><span>次へ</span><svg aria-hidden="true"><use href="#i-right"/></svg></button><button type="button" id="reader-last" class="text-button reader-jump" data-reader-action="last">最後へ</button></nav><p class="reader-help">左右のページを押してめくる。スワイプ・キーボードの ← → でも。</p></footer>
+  </dialog>
 </body>
 </html>

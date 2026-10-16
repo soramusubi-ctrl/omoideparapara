@@ -2,6 +2,7 @@ import { createAlbum, makeId, loadDraft, saveDraft, validateAlbum, serializeAlbu
 import { PAGE_WIDTH, PAGE_HEIGHT, renderAlbumPage, downloadPdf, downloadPng, downloadBlob, sanitizeFilename } from './album-renderer.js';
 import { MAX_PROJECT_BYTES, assertProjectBudget } from './album-limits.js';
 import { FONT_OPTIONS } from './album-fonts.js';
+import { createAlbumReader } from './album-reader.js';
 
 const FRAME_OPTIONS = Object.freeze([
   { value: 'none', label: '枠なし' },
@@ -28,6 +29,7 @@ let saveQueue = Promise.resolve();
 let lastUndo = null;
 let dragDepth = 0;
 let lastSaveError = '';
+const albumReader = createAlbumReader({ dialog: $('#book-dialog'), getAlbum: snapshot, renderPage: renderAlbumPage, onError: reportError });
 
 function snapshot() { return { ...album, pages: album.pages.map((page) => ({ ...page })) }; }
 function selectedPage() { return selected === 0 ? null : album.pages[selected - 1]; }
@@ -308,6 +310,7 @@ async function openProject(file) {
   try { candidate = validateAlbum(JSON.parse(await file.text())); }
   catch (error) { throw new Error(error instanceof SyntaxError ? 'アルバムの編集データ（.album.json）を選んでください。' : error.message); }
   assertProjectBudget(candidate);
+  albumReader.close();
   if (hasContent() && !await confirmAction('編集データを開きますか？', 'いま表示しているアルバムを、選んだ編集データに置き換えます。\nいまの内容を残す場合は、先に編集データで保存してください。', '置き換えて開く')) return;
   await busyTask('アルバムを開いています', async () => {
     await decodeImportedImages(candidate);
@@ -366,6 +369,7 @@ async function handleAction(action, button) {
     case 'view-edit': setView('edit'); break;
     case 'view-preview': setView('preview'); break;
     case 'zoom': copyToZoom(); $('#zoom-dialog').showModal(); break;
+    case 'read-book': await albumReader.open(selected); break;
     case 'close-zoom': $('#zoom-dialog').close(); break;
     case 'theme': album.theme = button.dataset.theme; commit({ full: true }); break;
     case 'font': {
@@ -482,12 +486,13 @@ $('#background-input').addEventListener('change', async (event) => { const file 
 $('#project-input').addEventListener('change', async (event) => { const file = event.target.files[0]; event.target.value = ''; try { await openProject(file); } catch (error) { reportError(error); } });
 
 document.addEventListener('dragenter', (event) => {
-  if (!event.dataTransfer?.types.includes('Files') || busy) return;
+  if (!event.dataTransfer?.types.includes('Files') || busy || $('#book-dialog').open) return;
   event.preventDefault(); dragDepth += 1;
   $('#drop-overlay').hidden = Boolean(event.target.closest('.photo-picker, .background-picker'));
 });
 document.addEventListener('dragover', (event) => {
   if (!event.dataTransfer?.types.includes('Files')) return;
+  if ($('#book-dialog').open) { event.preventDefault(); return; }
   event.preventDefault(); event.dataTransfer.dropEffect = busy ? 'none' : 'copy';
   const target = event.target.closest('.photo-picker, .background-picker');
   document.querySelectorAll('.photo-picker, .background-picker').forEach((picker) => picker.classList.toggle('is-dragging', picker === target));
@@ -497,7 +502,7 @@ document.addEventListener('drop', async (event) => {
   if (!event.dataTransfer?.files.length) return;
   event.preventDefault(); dragDepth = 0; $('#drop-overlay').hidden = true;
   document.querySelectorAll('.is-dragging').forEach((picker) => picker.classList.remove('is-dragging'));
-  if (busy || !ready) return;
+  if (busy || !ready || $('#book-dialog').open) return;
   const files = [...event.dataTransfer.files];
   try {
     if (files.length === 1 && /\.(json|album)$/i.test(files[0].name)) await openProject(files[0]);
