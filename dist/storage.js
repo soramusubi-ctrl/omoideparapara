@@ -6,6 +6,7 @@ const MAX_INPUT_BYTES = 30 * 1024 * 1024;
 const MAX_IMAGE_EDGE = 2400;
 const DEFAULT_BACKGROUND_OPACITY = 0.22;
 const THEMES = new Set(['linen', 'sky', 'rose', 'plain']);
+const FONTS = new Set(['serif', 'sans', 'rounded']);
 const FITS = new Set(['contain', 'cover']);
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
 const MAX_VALIDATED_IMAGES = 128;
@@ -257,6 +258,7 @@ export function createAlbum() {
     title: '思い出のアルバム',
     subtitle: '',
     theme: 'linen',
+    font: 'serif',
     coverImage: null,
     coverImageName: '',
     coverFit: 'contain',
@@ -298,6 +300,7 @@ export function validateAlbum(candidate) {
     title: boundedString(own(album, 'title', 'タイトル'), 120, 'タイトル'),
     subtitle: boundedString(own(album, 'subtitle', 'サブタイトル'), 180, 'サブタイトル'),
     theme: enumValue(own(album, 'theme', 'テーマ'), THEMES, 'テーマ'),
+    font: enumValue(optionalOwn(album, 'font', '文字の書体', 'serif'), FONTS, '文字の書体'),
     coverImage: imageValue(own(album, 'coverImage', '表紙の写真')),
     coverImageName: boundedString(own(album, 'coverImageName', '表紙の写真の名前'), 260, '表紙の写真の名前'),
     coverFit: enumValue(own(album, 'coverFit', '表紙の表示方法'), FITS, '表紙の表示方法'),

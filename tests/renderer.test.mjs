@@ -2,13 +2,24 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { writeFile, mkdir } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { PAGE_WIDTH, PAGE_HEIGHT, THEMES, renderAlbumPage, buildPdfFromJpegs, sanitizeFilename, downloadPdf, downloadPng } from '../dist/album-renderer.js';
+import { FONT_OPTIONS, getAlbumFont } from '../dist/album-fonts.js';
 
 const require = createRequire(import.meta.url);
 let canvasModule;
 try {
   canvasModule = require('@napi-rs/canvas');
 } catch { /* Pure PDF and filename checks still run without optional native canvas. */ }
+
+// Native QA hosts may lack Japanese faces; use distinct installed Latin faces
+// to verify that switching the selected family changes actual raster output.
+if (canvasModule) {
+  const fonts = canvasModule.GlobalFonts;
+  if (!fonts.has('Noto Serif JP')) fonts.setAlias('DejaVu Serif', 'Noto Serif JP');
+  if (!fonts.has('Noto Sans JP')) fonts.setAlias('DejaVu Sans', 'Noto Sans JP');
+  assert.ok(fonts.registerFromPath(fileURLToPath(new URL('../dist/fonts/mplus-rounded-1c-regular.woff2', import.meta.url)), 'Album Rounded'), 'The actual bundled rounded font must load in native QA.');
+}
 
 const album = {
   title: 'あの日の小さな思い出', subtitle: 'ずっと大切にしたい、家族の記録。', theme: 'linen', coverImage: null,
@@ -21,6 +32,7 @@ function instrumentedCanvas() {
   const text = [];
   const images = [];
   const fills = [];
+  const measurements = [];
   const proxy = new Proxy(base, {
     get(target, property) {
       if (property === 'fillText') return (value, x, y) => {
@@ -35,13 +47,17 @@ function instrumentedCanvas() {
         fills.push({ args, alpha: target.globalAlpha, color: target.fillStyle });
         return target.fillRect(...args);
       };
+      if (property === 'measureText') return value => {
+        measurements.push({ value, font: target.font });
+        return target.measureText(value);
+      };
       const value = Reflect.get(target, property, target);
       return typeof value === 'function' ? value.bind(target) : value;
     },
     set(target, property, value) { return Reflect.set(target, property, value, target); },
   });
   canvas.getContext = () => proxy;
-  return { canvas, text, images, fills };
+  return { canvas, text, images, fills, measurements };
 }
 
 function solidImage(color, width = 10, height = 10) {
@@ -100,9 +116,9 @@ test('full-length Japanese copy fits the artboard and literal dates survive rend
     subtitle: '何気ない毎日のなかにある、かけがえのない思い出を残して。'.repeat(8).slice(0, 180),
     pages: [{ image: null, fit: 'contain', date: '2026-01-01', note: 'お散歩の途中で見つけた花。みんなの笑顔が、いつまでも心に残っています。'.repeat(12).slice(0, 300) }],
   };
-  for (const index of [0, 1]) {
+  for (const font of ['serif', 'sans', 'rounded']) for (const index of [0, 1]) {
     const { canvas, text } = instrumentedCanvas();
-    await renderAlbumPage(canvas, longAlbum, index);
+    await renderAlbumPage(canvas, { ...longAlbum, font }, index);
     assert.equal(canvas.width, PAGE_WIDTH);
     assert.equal(canvas.height, PAGE_HEIGHT);
     for (const item of text) {
@@ -116,7 +132,7 @@ test('full-length Japanese copy fits the artboard and literal dates survive rend
     if (index === 1) assert.ok(text.some(item => item.value === '2026-01-01'));
     if (process.env.ALBUM_RENDERER_QA_DIR) {
       await mkdir(process.env.ALBUM_RENDERER_QA_DIR, { recursive: true });
-      await writeFile(`${process.env.ALBUM_RENDERER_QA_DIR}/${index ? 'long-note' : 'cover'}.png`, canvas.toBuffer('image/png'));
+      await writeFile(`${process.env.ALBUM_RENDERER_QA_DIR}/${font}-${index ? 'long-note' : 'cover'}.png`, canvas.toBuffer('image/png'));
     }
   }
   const { canvas } = instrumentedCanvas();
@@ -337,6 +353,115 @@ test('plain retains photo and text layout, and switching back restores the store
   }
 });
 
+test('font choices reach every text role, change output, and preserve the default family', { skip: !canvasModule }, async () => {
+  globalThis.Image = canvasModule.Image;
+  const shortAlbum = {
+    ...album, title: 'Our family memories', subtitle: 'Little moments together',
+    pages: [{ image: null, date: '2026-10-16', note: 'A special little day', fit: 'contain' }],
+  };
+  const outputs = new Map();
+  for (const { value } of FONT_OPTIONS) {
+    for (const index of [0, 1]) {
+      const { canvas, text } = instrumentedCanvas();
+      await renderAlbumPage(canvas, { ...shortAlbum, font: value }, index);
+      assert.ok(text.length >= 2);
+      for (const item of text) assert.ok(item.font.endsWith(getAlbumFont(value)), `${value}: ${item.font}`);
+      outputs.set(`${value}-${index}`, canvas.toBuffer('image/png'));
+      if (index === 1) assert.deepEqual(text.map(item => item.value), ['2026-10-16', 'A special little day', '01']);
+    }
+  }
+  assert.notDeepEqual(outputs.get('serif-0'), outputs.get('sans-0'));
+  assert.notDeepEqual(outputs.get('rounded-0'), outputs.get('serif-0'));
+  assert.notDeepEqual(outputs.get('rounded-0'), outputs.get('sans-0'));
+  for (const font of [undefined, 'unknown']) {
+    const { canvas } = instrumentedCanvas();
+    await renderAlbumPage(canvas, { ...shortAlbum, font }, 0);
+    assert.deepEqual(canvas.toBuffer('image/png'), outputs.get('serif-0'));
+  }
+});
+
+test('font readiness is awaited, cached per family, and extended for newly edited glyphs', { skip: !canvasModule }, async () => {
+  globalThis.Image = canvasModule.Image;
+  const previousDocument = globalThis.document;
+  let resolveReady;
+  const loads = [];
+  const pendingLoads = [];
+  globalThis.document = {
+    fonts: {
+      ready: new Promise(resolve => { resolveReady = resolve; }),
+      load(specification, sample) {
+        loads.push({ specification, sample });
+        return new Promise(resolve => pendingLoads.push(resolve));
+      },
+    },
+  };
+  const tick = () => new Promise(resolve => setImmediate(resolve));
+  const releaseLoads = () => pendingLoads.splice(0).forEach(resolve => resolve([]));
+  const requestedAlbum = { ...album, title: '家族', subtitle: '記録', font: 'serif', pages: [{ ...album.pages[0], note: '花', date: '' }] };
+  try {
+    const first = instrumentedCanvas();
+    const pending = renderAlbumPage(first.canvas, requestedAlbum, 0);
+    await tick();
+    assert.equal(loads.length, 0);
+    assert.equal(first.measurements.length, 0);
+    resolveReady();
+    await tick();
+    assert.equal(loads.length, 3);
+    assert.ok(loads.every(load => load.specification.endsWith(getAlbumFont('serif'))));
+    assert.ok(loads.every(load => [...'家族記録花0123456789-'].every(character => load.sample.includes(character))));
+    assert.equal(first.measurements.length, 0);
+    // A render uses the same text/font snapshot even if editing continues while loading.
+    requestedAlbum.title = '桜';
+    requestedAlbum.font = 'rounded';
+    releaseLoads();
+    await pending;
+    assert.ok(first.text.some(item => item.value === '家族'));
+    assert.ok(first.text.every(item => item.font.endsWith(getAlbumFont('serif'))));
+    const serifAlbum = { ...requestedAlbum, title: '家族', font: 'serif' };
+    await renderAlbumPage(instrumentedCanvas().canvas, serifAlbum, 1);
+    assert.equal(loads.length, 3);
+
+    const sans = instrumentedCanvas();
+    const sansPending = renderAlbumPage(sans.canvas, { ...serifAlbum, font: 'sans' }, 1);
+    await tick();
+    assert.equal(loads.length, 6);
+    assert.ok(loads.slice(3).every(load => load.specification.endsWith(getAlbumFont('sans'))));
+    assert.equal(sans.measurements.length, 0);
+    releaseLoads();
+    await sansPending;
+    await renderAlbumPage(instrumentedCanvas().canvas, serifAlbum, 0);
+    assert.equal(loads.length, 6);
+
+    const edited = instrumentedCanvas();
+    const editPending = renderAlbumPage(edited.canvas, { ...serifAlbum, title: '桜' }, 0);
+    await tick();
+    assert.equal(loads.length, 9);
+    assert.ok(loads.slice(6).every(load => load.sample === '桜'));
+    assert.equal(edited.measurements.length, 0);
+    releaseLoads();
+    await editPending;
+  } finally {
+    releaseLoads();
+    globalThis.document = previousDocument;
+  }
+});
+
+test('a failed font load can be retried', { skip: !canvasModule }, async () => {
+  globalThis.Image = canvasModule.Image;
+  const previousDocument = globalThis.document;
+  let fail = true;
+  let calls = 0;
+  globalThis.document = { fonts: { ready: Promise.resolve(), load() { calls += 1; return fail ? Promise.reject(new Error('font unavailable')) : Promise.resolve([]); } } };
+  try {
+    await assert.rejects(renderAlbumPage(instrumentedCanvas().canvas, { ...album, font: 'rounded' }, 0), /font unavailable/);
+    fail = false;
+    await renderAlbumPage(instrumentedCanvas().canvas, { ...album, font: 'rounded' }, 0);
+    assert.equal(calls, 6);
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
 
 test('browser download APIs produce actual PNG and all album pages in a PDF', { skip: !canvasModule }, async () => {
   globalThis.Image = canvasModule.Image;
@@ -345,11 +470,17 @@ test('browser download APIs produce actual PNG and all album pages in a PDF', { 
   const nativeSetTimeout = globalThis.setTimeout;
   const previousDocument = globalThis.document;
   const previousURL = globalThis.URL;
+  const exportCanvases = [];
+  const fontLoads = [];
   globalThis.document = {
-    fonts: { ready: Promise.resolve(), load: async () => [] },
+    fonts: { ready: Promise.resolve(), load: async specification => { fontLoads.push(specification); return []; } },
     body: { appendChild() {} },
     createElement(tag) {
-      if (tag === 'canvas') return canvasModule.createCanvas(1, 1);
+      if (tag === 'canvas') {
+        const record = instrumentedCanvas();
+        exportCanvases.push(record);
+        return record.canvas;
+      }
       if (tag === 'a') return {
         style: {}, href: '', download: '',
         click() { downloads.push(this.download); }, remove() {},
@@ -360,7 +491,7 @@ test('browser download APIs produce actual PNG and all album pages in a PDF', { 
   globalThis.URL = { createObjectURL: () => 'blob:test', revokeObjectURL: value => revoked.push(value) };
   globalThis.setTimeout = (callback, delay) => nativeSetTimeout(callback, delay === 30000 ? 0 : delay);
   try {
-    const exportAlbum = { ...album, theme: 'plain', backgroundImage: 'data:image/png;base64,broken-background', backgroundOpacity: 1 };
+    const exportAlbum = { ...album, font: 'rounded', theme: 'plain', backgroundImage: 'data:image/png;base64,broken-background', backgroundOpacity: 1 };
     const progress = [];
     const png = await downloadPng(exportAlbum, 1);
     assert.equal(png.type, 'image/png');
@@ -386,6 +517,10 @@ test('browser download APIs produce actual PNG and all album pages in a PDF', { 
       exportedImages += 1;
     }
     assert.equal(exportedImages, 3);
+    assert.equal(exportCanvases.length, 2);
+    assert.ok(exportCanvases.every(record => record.text.length > 0 && record.text.every(text => text.font.endsWith(getAlbumFont('rounded')))));
+    assert.equal(fontLoads.length, 3);
+    assert.ok(fontLoads.every(specification => specification.endsWith(getAlbumFont('rounded'))));
     assert.deepEqual(progress, [{ current: 1, total: 3 }, { current: 2, total: 3 }, { current: 3, total: 3 }]);
     assert.deepEqual(downloads, ['あの日の小さな思い出-02.png', 'あの日の小さな思い出.pdf']);
   } finally {

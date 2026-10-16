@@ -1,6 +1,7 @@
 import { createAlbum, makeId, loadDraft, saveDraft, validateAlbum, serializeAlbum, fileToImage } from './storage.js';
 import { PAGE_WIDTH, PAGE_HEIGHT, renderAlbumPage, downloadPdf, downloadPng, downloadBlob, sanitizeFilename } from './album-renderer.js';
 import { MAX_PROJECT_BYTES, assertProjectBudget } from './album-limits.js';
+import { FONT_OPTIONS } from './album-fonts.js';
 
 const $ = (selector) => document.querySelector(selector);
 const icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
@@ -116,6 +117,7 @@ function renderEditor() {
     <div class="field"><label for="album-subtitle">サブタイトル<span class="optional">任意</span></label><textarea id="album-subtitle" name="subtitle" data-field="subtitle" maxlength="180" rows="2" placeholder="旅先や、いっしょに過ごした人の名前など">${escape(album.subtitle)}</textarea></div>` : `<div class="field"><label for="page-date">日付<span class="optional">任意</span></label><div class="date-control"><input type="date" id="page-date" name="date" data-field="date" value="${escape(page.date)}" min="0001-01-01" max="9999-12-31" aria-describedby="date-help"><button type="button" class="date-none" data-action="clear-date" aria-pressed="${!page.date}">日付なし</button></div><p class="field-help" id="date-help">「日付なし」を選ぶと、日付を印字せずに保存します。</p></div>
     <div class="field"><label for="page-note">ひとこと<span class="optional">任意</span></label><textarea id="page-note" name="note" data-field="note" maxlength="300" rows="4" placeholder="このとき、みんなで笑ったね。">${escape(page.note)}</textarea><div class="field-footer"><span>書かなくても大丈夫</span><span data-count="note">${page.note.length} / 300</span></div></div>`}
     <div class="field"><span class="field-label">画像の見せ方</span><div class="segments" role="group" aria-label="画像の見せ方"><button type="button" data-action="fit-contain" aria-pressed="${fit === 'contain'}">全体を入れる</button><button type="button" data-action="fit-cover" aria-pressed="${fit === 'cover'}">枠いっぱい</button></div><p class="field-help">「全体を入れる」なら、画像の端まで残せます。</p></div>
+    <div class="field"><span class="field-label">文字のフォント<span class="optional">全ページ共通</span></span><div class="font-options" role="group" aria-label="アルバムのフォント">${FONT_OPTIONS.map(({ value, label, family }) => `<button type="button" class="font-option" data-action="font" data-font="${value}" aria-pressed="${album.font === value}"><span class="font-preview" style="font-family:${escape(family)}">あいうえお</span><span>${label}</span></button>`).join('')}</div><p class="field-help">タイトル・日付・ひとことに反映します。</p></div>
     <div class="field theme-field"><span class="field-label">アルバムの色・背景<span class="optional">全ページ共通</span></span><div class="theme-options" role="group" aria-label="紙と文字の色">${[['linen', 'きなり', '#ede5d3'], ['sky', '空色', '#dcebf0'], ['rose', 'さくら', '#f1dfe0'], ['plain', '背景なし（白）', '#ffffff']].map(([value, label, color]) => `<button type="button" class="theme-option" data-action="theme" data-theme="${value}" aria-pressed="${album.theme === value}"><span class="theme-swatch" style="--swatch:${color}"></span>${label}</button>`).join('')}</div>
       ${album.theme === 'plain' ? `<p class="field-help">印刷向けの白い台紙です。背景画像や台紙の色・飾りを表示しません。${album.backgroundImage ? '背景画像は残っています。ほかの色を選ぶと戻せます。' : 'ほかの色を選ぶと、背景画像も設定できます。'}</p>` : `<button type="button" class="background-picker ${album.backgroundImage ? 'has-background' : ''}" data-action="choose-background" aria-label="背景画像を${album.backgroundImage ? '差し替える' : '選ぶ'}">${album.backgroundImage ? `<img src="${escape(album.backgroundImage)}" alt=""><span><strong>背景画像を差し替える</strong><small>${escape(album.backgroundImageName || '選択した画像')}</small></span>` : `${icon('image')}<span><strong>背景画像を選ぶ</strong><small>好きな絵や模様を、アルバムの台紙に。</small></span>`}</button>
       ${album.backgroundImage ? `<button class="image-remove" type="button" data-action="remove-background">背景画像を外す</button><div class="background-opacity"><label for="background-opacity">背景画像の濃さ <output for="background-opacity" id="background-opacity-value">${Math.round(album.backgroundOpacity * 100)}%</output></label><input id="background-opacity" type="range" data-field="backgroundOpacity" min="0" max="100" step="1" value="${Math.round(album.backgroundOpacity * 100)}" aria-describedby="background-help"></div>` : ''}
@@ -357,6 +359,13 @@ async function handleAction(action, button) {
     case 'zoom': copyToZoom(); $('#zoom-dialog').showModal(); break;
     case 'close-zoom': $('#zoom-dialog').close(); break;
     case 'theme': album.theme = button.dataset.theme; commit({ full: true }); break;
+    case 'font': {
+      if (!FONT_OPTIONS.some((font) => font.value === button.dataset.font)) break;
+      album.font = button.dataset.font;
+      commit({ full: true });
+      document.querySelector(`[data-action="font"][data-font="${album.font}"]`)?.focus({ preventScroll: true });
+      break;
+    }
     case 'clear-date': {
       const page = selectedPage();
       if (!page) break;

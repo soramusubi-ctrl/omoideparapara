@@ -25,6 +25,7 @@ test('new album has independent valid empty defaults', () => {
   assert.equal(first.schemaVersion, 1);
   assert.equal(first.title, '思い出のアルバム');
   assert.equal(first.theme, 'linen');
+  assert.equal(first.font, 'serif');
   assert.equal(first.coverImage, null);
   assert.equal(first.backgroundImage, null);
   assert.equal(first.backgroundImageName, '');
@@ -33,6 +34,30 @@ test('new album has independent valid empty defaults', () => {
   assert.notEqual(first.id, second.id);
   assert.notEqual(first.pages, second.pages);
   assert.deepEqual(validateAlbum(first), first);
+});
+
+test('legacy version-one albums default to serif without changing source data or text', () => {
+  const legacy = { ...createAlbum(), title: '  以前のアルバム  ', pages: [page({ note: '思い出を\nそのまま 🌿' })] };
+  delete legacy.font;
+  const normalized = validateAlbum(legacy);
+  assert.deepEqual(normalized, { ...legacy, font: 'serif' });
+  assert.equal(normalized.schemaVersion, 1);
+  assert.equal(Object.hasOwn(legacy, 'font'), false);
+  assert.equal(JSON.parse(serializeAlbum(legacy)).font, 'serif');
+});
+
+test('font selection accepts only the exact supported strings and never invokes accessors', () => {
+  for (const font of ['serif', 'sans', 'rounded']) {
+    assert.equal(validateAlbum({ ...createAlbum(), font }).font, font);
+  }
+  for (const font of [undefined, null, '', 'Serif', ' serif ', 'sans-serif', 'unknown', true, 1, {}, [], new String('serif')]) {
+    assert.throws(() => validateAlbum({ ...createAlbum(), font }), /書体/);
+  }
+  const album = createAlbum();
+  let invoked = false;
+  Object.defineProperty(album, 'font', { get() { invoked = true; return 'sans'; } });
+  assert.throws(() => validateAlbum(album), /書体/);
+  assert.equal(invoked, false);
 });
 
 test('older version-one backups normalize missing background fields without changing their content', () => {
@@ -233,11 +258,26 @@ test('print-friendly white theme preserves its background through JSON and draft
   } finally { fake.restore(); }
 });
 
-test('legacy draft records gain background defaults when loaded and saved', async () => {
+test('each supported font survives JSON and draft save/load roundtrips', async () => {
+  const fake = installFakeIndexedDB();
+  try {
+    for (const font of ['serif', 'sans', 'rounded']) {
+      const album = { ...createAlbum(), font, title: '書体を残すアルバム', pages: [page({ note: '大切な思い出' })] };
+      const imported = validateAlbum(JSON.parse(serializeAlbum(album)));
+      assert.deepEqual(imported, album);
+      assert.deepEqual(await saveDraft(imported), album);
+      assert.deepEqual(await loadDraft(), album);
+      assert.equal(fake.state.value.font, font);
+    }
+  } finally { fake.restore(); }
+});
+
+test('legacy draft records gain background and font defaults when loaded and saved', async () => {
   const legacy = createAlbum();
   delete legacy.backgroundImage;
   delete legacy.backgroundImageName;
   delete legacy.backgroundOpacity;
+  delete legacy.font;
   const fake = installFakeIndexedDB({ value: legacy });
   try {
     const loaded = await loadDraft();
@@ -245,6 +285,7 @@ test('legacy draft records gain background defaults when loaded and saved', asyn
     assert.equal(loaded.backgroundImage, null);
     assert.equal(loaded.backgroundImageName, '');
     assert.equal(loaded.backgroundOpacity, 0.22);
+    assert.equal(loaded.font, 'serif');
     await saveDraft(loaded);
     assert.deepEqual(fake.state.value, loaded);
   } finally { fake.restore(); }
@@ -279,6 +320,7 @@ test('denied IDB, blocked connections and corrupted drafts never masquerade as a
     { openError: new DOMException('denied', 'SecurityError') },
     { blocked: true },
     { value: { broken: true } },
+    { value: { ...createAlbum(), font: 'invalid' } },
   ]) {
     const fake = installFakeIndexedDB(options);
     try {

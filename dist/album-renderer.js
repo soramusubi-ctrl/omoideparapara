@@ -1,4 +1,6 @@
 /** Shared, dependency-free album artwork and browser downloads. */
+import { getAlbumFont } from './album-fonts.js';
+
 export const PAGE_WIDTH = 1240;
 export const PAGE_HEIGHT = 1754;
 
@@ -9,14 +11,12 @@ export const THEMES = Object.freeze({
   plain: Object.freeze({ paper: '#FFFFFF', ink: '#252525', accent: '#555555', muted: '#555555', line: '#FFFFFF', surface: '#FFFFFF', photo: '#FFFFFF' }),
 });
 
-const SERIF = '"Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", "MS PMincho", serif';
-const SANS = '"Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif';
 const PAGE_PT_WIDTH = 419.5276;
 const PAGE_PT_HEIGHT = 595.2756;
 const ENCODER = new TextEncoder();
 const NO_LINE_START = /^[、。，．・：；？！ー〜～…‥）〕］｝〉》」』】〙〗〟’”ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮヵヶ]/u;
 const NO_LINE_END = /[（〔［｛〈《「『【〘〖〝‘“]$/u;
-let fontReady;
+const fontReady = new WeakMap();
 
 function limitedText(value, maxLength) {
   return Array.from(String(value ?? '').replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')).slice(0, maxLength).join('').trim();
@@ -66,7 +66,7 @@ function wrapText(ctx, text, maxWidth) {
   return lines;
 }
 
-function textLayout(ctx, text, { size, minSize, maxHeight, width, leading = 1.5, weight = 400, family = SERIF }) {
+function textLayout(ctx, text, { size, minSize, maxHeight, width, leading = 1.5, weight = 400, family }) {
   if (!text) return { lines: [], size, lineHeight: 0, height: 0, font: `${weight} ${size}px ${family}` };
   let result;
   for (let candidate = size; candidate >= minSize; candidate -= 1) {
@@ -99,19 +99,37 @@ function drawText(ctx, layout, x, y, color, alignment = 'left') {
   ctx.restore();
 }
 
-async function waitForFonts() {
+async function waitForFonts(family, sample) {
   if (typeof document === 'undefined' || !document.fonts) return;
-  if (!fontReady) {
-    fontReady = (async () => {
-      await document.fonts.ready;
-      await Promise.all([
-        document.fonts.load(`500 76px ${SERIF}`, '思い出のアルバム'),
-        document.fonts.load(`400 30px ${SERIF}`, '大切な日の記録'),
-        document.fonts.load(`400 24px ${SANS}`, '0123456789-'),
-      ]);
-    })();
+  const fonts = document.fonts;
+  let families = fontReady.get(fonts);
+  if (!families) {
+    families = new Map();
+    fontReady.set(fonts, families);
   }
-  await fontReady;
+  let entry = families.get(family);
+  if (!entry) {
+    entry = { characters: new Set(), ready: Promise.resolve() };
+    families.set(family, entry);
+  }
+  // New text can require additional unicode-range font subsets after an edit.
+  const characters = [...new Set(Array.from(sample))].filter(character => !entry.characters.has(character));
+  if (characters.length) {
+    characters.forEach(character => entry.characters.add(character));
+    entry.ready = entry.ready.then(async () => {
+      await fonts.ready;
+      const text = characters.join('');
+      await Promise.all([
+        fonts.load(`500 76px ${family}`, text),
+        fonts.load(`400 30px ${family}`, text),
+        fonts.load(`400 24px ${family}`, text),
+      ]);
+    }).catch(error => {
+      if (families.get(family) === entry) families.delete(family);
+      throw error;
+    });
+  }
+  await entry.ready;
 }
 
 async function loadImage(source, label = '写真') {
@@ -225,13 +243,13 @@ function drawPhoto(ctx, image, box, fit, theme) {
   ctx.restore();
 }
 
-function folio(ctx, index, theme, hasBackground = false) {
+function folio(ctx, index, theme, family, hasBackground = false) {
   const center = PAGE_WIDTH / 2;
   if (hasBackground) textPanel(ctx, { x: center - 76, y: 1624, width: 152, height: 88 }, theme);
   if (theme !== THEMES.plain) line(ctx, center - 56, 1640, center + 56, 1640, theme.line);
   if (index > 0) {
     ctx.save();
-    ctx.font = `400 22px ${SANS}`;
+    ctx.font = `400 22px ${family}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
     ctx.fillStyle = hasBackground ? theme.ink : theme.muted;
@@ -252,7 +270,14 @@ export async function renderAlbumPage(canvas, album, index = 0) {
   if (!canvas || typeof canvas.getContext !== 'function') throw new TypeError('A canvas is required.');
   if (!album || !Array.isArray(album.pages)) throw new TypeError('A valid album is required.');
   if (!Number.isInteger(index) || index < 0 || index > album.pages.length) throw new RangeError('Album page index is out of range.');
-  await waitForFonts();
+  // Keep each render consistent while font or image loading yields to edits.
+  album = { ...album, pages: album.pages.map(page => ({ ...page })) };
+  const family = getAlbumFont(album.font);
+  const fontSample = [
+    '0123456789-', limitedText(album.title, 120), limitedText(album.subtitle, 180),
+    ...album.pages.flatMap(page => [limitedText(page.note, 300), limitedText(page.date, 32)]),
+  ].join('');
+  await waitForFonts(family, fontSample);
   const item = index === 0 ? null : album.pages[index - 1];
   const imageSource = index === 0 ? album.coverImage : item.image;
   const backgroundOpacity = Number.isFinite(album.backgroundOpacity)
@@ -274,10 +299,10 @@ export async function renderAlbumPage(canvas, album, index = 0) {
     const title = limitedText(album.title, 120);
     const subtitle = limitedText(album.subtitle, 180);
     const titleLayout = textLayout(ctx, title, {
-      size: 76, minSize: 42, width: 996, maxHeight: 360, leading: 1.38, weight: 500,
+      size: 76, minSize: 42, width: 996, maxHeight: 360, leading: 1.38, weight: 500, family,
     });
     const subtitleLayout = textLayout(ctx, subtitle, {
-      size: 28, minSize: 20, width: 940, maxHeight: 180, leading: 1.65,
+      size: 28, minSize: 20, width: 940, maxHeight: 180, leading: 1.65, family,
     });
     if (theme !== THEMES.plain) line(ctx, 572, 126, 668, 126, theme.accent, 2);
     const titleTop = 187;
@@ -293,7 +318,7 @@ export async function renderAlbumPage(canvas, album, index = 0) {
     const note = limitedText(item.note, 300);
     const date = limitedText(item.date, 32);
     const noteLayout = textLayout(ctx, note, {
-      size: 30, minSize: 27, width: 1008, maxHeight: 490, leading: 1.65,
+      size: 30, minSize: 27, width: 1008, maxHeight: 490, leading: 1.65, family,
     });
     const dateHeight = date ? 34 : 0;
     const dateNoteGap = date && note ? 24 : 0;
@@ -307,7 +332,7 @@ export async function renderAlbumPage(canvas, album, index = 0) {
     }
     if (date) {
       ctx.save();
-      ctx.font = `400 23px ${SANS}`;
+      ctx.font = `400 23px ${family}`;
       ctx.textBaseline = 'top';
       ctx.textAlign = 'left';
       ctx.fillStyle = background ? theme.ink : theme.accent;
@@ -318,7 +343,7 @@ export async function renderAlbumPage(canvas, album, index = 0) {
     }
     drawText(ctx, noteLayout, 116, textTop, theme.ink);
   }
-  folio(ctx, index, theme, Boolean(background));
+  folio(ctx, index, theme, family, Boolean(background));
   return canvas;
 }
 
