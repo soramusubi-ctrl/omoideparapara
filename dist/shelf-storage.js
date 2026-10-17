@@ -53,6 +53,13 @@ function own(record, field) {
   return descriptor.value;
 }
 
+function optionalOwn(record, field, fallback) {
+  const descriptor = Object.getOwnPropertyDescriptor(record, field);
+  if (!descriptor) return fallback;
+  if (!Object.hasOwn(descriptor, 'value')) throw corruptError();
+  return descriptor.value;
+}
+
 function plainRecord(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw corruptError();
   const prototype = Object.getPrototypeOf(value);
@@ -106,6 +113,7 @@ function summaryRecord(value, id) {
       title: own(record, 'title'),
       subtitle: own(record, 'subtitle'),
       theme: own(record, 'theme'),
+      coverStyle: optionalOwn(record, 'coverStyle', 'classic'),
       coverImage: thumbnail,
       coverImageName: '',
       coverFit: 'contain',
@@ -121,6 +129,7 @@ function summaryRecord(value, id) {
       title: metadata.title,
       subtitle: metadata.subtitle,
       theme: metadata.theme,
+      coverStyle: metadata.coverStyle,
       pageCount,
       createdAt: metadata.createdAt,
       updatedAt: metadata.updatedAt,
@@ -133,7 +142,7 @@ function summaryRecord(value, id) {
 
 function matchingSummary(summary, album) {
   return summary.id === album.id && summary.title === album.title && summary.subtitle === album.subtitle
-    && summary.theme === album.theme && summary.pageCount === album.pages.length
+    && summary.theme === album.theme && summary.coverStyle === album.coverStyle && summary.pageCount === album.pages.length
     && summary.createdAt === album.createdAt && summary.updatedAt === album.updatedAt;
 }
 
@@ -285,6 +294,7 @@ async function makeSummary(album) {
     title: album.title,
     subtitle: album.subtitle,
     theme: album.theme,
+    coverStyle: album.coverStyle,
     pageCount: album.pages.length,
     createdAt: album.createdAt,
     updatedAt: album.updatedAt,

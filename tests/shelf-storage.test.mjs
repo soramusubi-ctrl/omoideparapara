@@ -55,7 +55,7 @@ function fixture() {
 }
 
 function summary(album, thumbnail = null) {
-  return { id: album.id, title: album.title, subtitle: album.subtitle, theme: album.theme, pageCount: album.pages.length, createdAt: album.createdAt, updatedAt: album.updatedAt, thumbnail };
+  return { id: album.id, title: album.title, subtitle: album.subtitle, theme: album.theme, coverStyle: album.coverStyle, pageCount: album.pages.length, createdAt: album.createdAt, updatedAt: album.updatedAt, thumbnail };
 }
 
 function photo(overrides = {}) {
@@ -97,6 +97,7 @@ shelfTest('legacy current migrates once, normalizes old fields, and remains byte
     delete legacy.backgroundImageName;
     delete legacy.backgroundOpacity;
     delete legacy.coverFrame;
+    delete legacy.coverStyle;
     await db.put('current', legacy);
     const original = JSON.stringify(await readLegacyDraft());
     assert.deepEqual(await migrateLegacyDraft(), { found: true, migrated: true, invalid: false, albumId: legacy.id });
@@ -161,6 +162,53 @@ shelfTest('several independent books survive new connections and a fresh module 
   } finally { db.restore(); }
 });
 
+shelfTest('both cover styles persist in saved albums and metadata summaries across CAS updates', async () => {
+  const db = fixture();
+  try {
+    const classic = { ...createAlbum(), title: 'いつもの表紙', coverStyle: 'classic' };
+    const scrapbook = { ...createAlbum(), title: 'スクラップ表紙', coverStyle: 'scrapbook', pages: [photo()] };
+    await saveAlbum(classic);
+    await saveAlbum(scrapbook);
+    for (const album of [classic, scrapbook]) {
+      assert.deepEqual(await loadSavedAlbum(album.id), { album, revision: 1 });
+      assert.deepEqual(await db.get(SUMMARY + album.id), summary(album));
+    }
+    assert.deepEqual(new Set((await listAlbums()).map(item => item.coverStyle)), new Set(['classic', 'scrapbook']));
+    const changed = { ...classic, coverStyle: 'scrapbook' };
+    assert.deepEqual(await saveAlbum(changed, { expectedRevision: 1 }), { album: changed, revision: 2 });
+    assert.equal((await listAlbums()).find(item => item.id === classic.id).coverStyle, 'scrapbook');
+    assert.deepEqual(await db.get(SUMMARY + classic.id), summary(changed));
+    assert.equal(await db.get('current'), undefined);
+  } finally { db.restore(); }
+});
+
+shelfTest('legacy album and summary styles normalize to classic without rewriting raw records or breaking CAS', async () => {
+  const db = fixture();
+  try {
+    const legacy = { ...createAlbum(), title: '  以前の表紙  ' };
+    delete legacy.coverStyle;
+    const oldSummary = summary(legacy);
+    delete oldSummary.coverStyle;
+    const oldRecord = { album: legacy, revision: 7 };
+    await db.put('current', legacy);
+    await db.put(ALBUM + legacy.id, oldRecord);
+    await db.put(SUMMARY + legacy.id, oldSummary);
+    assert.deepEqual(await listAlbums(), [{ ...oldSummary, coverStyle: 'classic' }]);
+    const loaded = await loadSavedAlbum(legacy.id);
+    assert.deepEqual(loaded, { album: { ...legacy, coverStyle: 'classic' }, revision: 7 });
+    assert.deepEqual(await db.get(ALBUM + legacy.id), oldRecord);
+    assert.deepEqual(await db.get(SUMMARY + legacy.id), oldSummary);
+    assert.deepEqual(await db.get('current'), legacy);
+    const changed = { ...loaded.album, coverStyle: 'scrapbook' };
+    assert.deepEqual(await saveAlbum(changed, { expectedRevision: 7 }), { album: changed, revision: 8 });
+    assert.deepEqual(await db.get(SUMMARY + legacy.id), summary(changed));
+    assert.deepEqual(await db.get('current'), legacy);
+    const connection = await db.connection();
+    assert.equal(connection.version, 1);
+    connection.close();
+  } finally { db.restore(); }
+});
+
 shelfTest('listing reads only the summary prefix and never clones full saved albums with getAll', async t => {
   const db = fixture();
   try {
@@ -184,7 +232,7 @@ shelfTest('listing reads only the summary prefix and never clones full saved alb
     assert.deepEqual(await listAlbums(), [summary(album)]);
     assert.equal(seen.length, 2);
     const storedSummary = await db.get(SUMMARY + album.id);
-    assert.deepEqual(Object.keys(storedSummary), ['id', 'title', 'subtitle', 'theme', 'pageCount', 'createdAt', 'updatedAt', 'thumbnail']);
+    assert.deepEqual(Object.keys(storedSummary), ['id', 'title', 'subtitle', 'theme', 'coverStyle', 'pageCount', 'createdAt', 'updatedAt', 'thumbnail']);
     assert.equal(JSON.stringify(storedSummary).includes(png), false);
   } finally { db.restore(); }
 });
@@ -284,6 +332,9 @@ shelfTest('corrupt wrappers, orphan records and mismatched summaries cannot be o
     [undefined, summary(candidate)],
     [{ album: candidate, revision: 1 }, undefined],
     [{ album: candidate, revision: 1 }, { ...summary(candidate), title: 'mismatch' }],
+    [{ album: candidate, revision: 1 }, { ...summary(candidate), coverStyle: 'scrapbook' }],
+    [{ album: candidate, revision: 1 }, { ...summary(candidate), coverStyle: 'invalid' }],
+    [{ album: candidate, revision: 1 }, { ...summary(candidate), coverStyle: undefined }],
     [{ album: candidate, revision: 1 }, { ...summary(candidate), thumbnail: png }],
     [{ album: candidate, revision: 1 }, { ...summary(candidate), pageCount: 101 }],
   ];

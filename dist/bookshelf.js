@@ -48,18 +48,28 @@ export function createBookshelf({ document: doc = globalThis.document, window: w
     const item = node('li', 'shelf-item');
     const article = node('article', 'shelf-card');
     const theme = ['linen', 'sky', 'rose', 'plain'].includes(summary.theme) ? summary.theme : 'linen';
-    const cover = node('div', `shelf-cover cover-${theme}`);
+    const scrapbook = summary.coverStyle === 'scrapbook';
+    const cover = node('div', `shelf-cover cover-${theme}${scrapbook ? ' cover-scrapbook' : ''}`);
     const fallback = node('div', 'shelf-cover-title', title);
     cover.append(fallback);
+    const photoMount = scrapbook ? node('div', 'shelf-scrap-photo') : cover;
+    if (scrapbook) {
+      fallback.hidden = false;
+      const tape = node('span', 'shelf-scrap-tape');
+      const pins = node('span', 'shelf-scrap-pins');
+      tape.setAttribute('aria-hidden', 'true');
+      pins.setAttribute('aria-hidden', 'true');
+      cover.append(photoMount, tape, pins);
+    }
     if (typeof summary.thumbnail === 'string' && /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(summary.thumbnail)) {
       const thumbnail = node('img', 'shelf-thumbnail');
       thumbnail.alt = '';
       thumbnail.loading = 'lazy';
       thumbnail.decoding = 'async';
       thumbnail.src = summary.thumbnail;
-      fallback.hidden = true;
+      fallback.hidden = !scrapbook;
       thumbnail.addEventListener('error', () => { thumbnail.remove(); fallback.hidden = false; });
-      cover.append(thumbnail);
+      photoMount.append(thumbnail);
     }
     const details = node('div', 'shelf-card-details');
     const heading = node('h2', 'shelf-card-title', title);

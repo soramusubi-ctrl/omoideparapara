@@ -7,6 +7,11 @@ import { listAlbums, loadSavedAlbum, saveAlbum, migrateLegacyDraft } from './she
 import { createAlbumWriter } from './album-writer.js';
 import { readAlbumFile, decodeAlbumImages } from './album-import.js';
 
+const COVER_STYLES = Object.freeze([
+  { value: 'classic', label: 'シンプル' },
+  { value: 'scrapbook', label: 'スクラップブック風' }
+]);
+
 const FRAME_OPTIONS = Object.freeze([
   { value: 'none', label: '枠なし' },
   { value: 'white', label: '白ふち' },
@@ -178,6 +183,7 @@ function renderEditor() {
   const frame = (isCover ? album.coverFrame : page.frame) || 'none';
   $('#editor-heading').innerHTML = `<span class="editor-index">${isCover ? 'COVER' : `PAGE ${String(selected).padStart(2, '0')}`}</span><h2>${isCover ? '表紙をつくる' : '思い出を綴る'}</h2><p>${isCover ? '最初の一枚に、あなたらしいタイトルを。' : 'この一枚に、日付とひとことを添えて。'}</p>`;
   $('#editor-form').innerHTML = `
+    ${isCover ? `<div class="field"><span class="field-label">表紙のデザイン</span><div class="cover-style-options" role="group" aria-label="表紙のデザイン">${COVER_STYLES.map(({ value, label }) => `<button type="button" class="cover-style-option" data-action="cover-style" data-cover-style="${value}" aria-pressed="${(album.coverStyle || 'classic') === value}"><span class="cover-style-preview cover-style-preview-${value}" aria-hidden="true"><span class="cover-style-preview-title"></span><span class="cover-style-preview-photo"></span></span><span>${label}</span></button>`).join('')}</div><p class="field-help">${album.coverStyle === 'scrapbook' ? (album.theme === 'plain' ? '白い台紙に写真を飾ります。コルク・マステ・画鋲は省いて印刷できます。' : 'コルクに写真とことばを貼る表紙です。マステと画鋲２個を添えます。') : '写真とタイトルをすっきり並べる表紙です。'}</p></div>` : ''}
     <div class="field"><span class="field-label">${isCover ? '表紙の画像' : 'ページの画像'}</span>
       <button type="button" class="photo-picker ${image ? 'has-photo' : ''}" data-action="choose-image" aria-label="${isCover ? '表紙' : 'このページ'}の画像を${image ? '差し替える' : '選ぶ'}">
         ${image ? `<img src="${escape(image)}" alt="${escape(imageName || '選択した画像')}"><span class="replace-label">画像を差し替える</span>` : `${icon('image')}<strong>画像を選ぶ</strong><small>または、ここにドラッグ</small>`}
@@ -187,12 +193,12 @@ function renderEditor() {
     <div class="field"><label for="album-subtitle">サブタイトル<span class="optional">任意</span></label><textarea id="album-subtitle" name="subtitle" data-field="subtitle" maxlength="180" rows="2" placeholder="旅先や、いっしょに過ごした人の名前など">${escape(album.subtitle)}</textarea></div>` : `<div class="field"><label for="page-date">日付<span class="optional">任意</span></label><div class="date-control"><input type="date" id="page-date" name="date" data-field="date" value="${escape(page.date)}" min="0001-01-01" max="9999-12-31" aria-describedby="date-help"><button type="button" class="date-none" data-action="clear-date" aria-pressed="${!page.date}">日付なし</button></div><p class="field-help" id="date-help">「日付なし」を選ぶと、日付を印字せずに保存します。</p></div>
     <div class="field"><label for="page-note">ひとこと<span class="optional">任意</span></label><textarea id="page-note" name="note" data-field="note" maxlength="300" rows="4" placeholder="このとき、みんなで笑ったね。">${escape(page.note)}</textarea><div class="field-footer"><span>書かなくても大丈夫</span><span data-count="note">${page.note.length} / 300</span></div></div>`}
     <div class="field"><span class="field-label">画像の見せ方</span><div class="segments" role="group" aria-label="画像の見せ方"><button type="button" data-action="fit-contain" aria-pressed="${fit === 'contain'}">全体を入れる</button><button type="button" data-action="fit-cover" aria-pressed="${fit === 'cover'}">枠いっぱい</button></div><p class="field-help">「全体を入れる」は、画像を中央で切り抜かずに収めます。</p></div>
-    <div class="field"><span class="field-label">写真の枠<span class="optional">この${isCover ? '表紙' : 'ページ'}</span></span><div class="frame-options" role="group" aria-label="${isCover ? '表紙' : 'このページ'}の写真の枠">${FRAME_OPTIONS.map(({ value, label }) => `<button type="button" class="frame-option" data-action="frame" data-frame="${value}" aria-pressed="${frame === value}"><span class="frame-preview frame-preview-${value}" aria-hidden="true"><span class="frame-preview-photo"></span></span><span>${label}</span></button>`).join('')}</div><p class="field-help">写真ごとに選べます。角丸は写真の角も丸くなります。PDF・PNGにも反映します。</p></div>
+    ${isCover && album.coverStyle === 'scrapbook' ? `<div class="field"><span class="field-label">写真の枠<span class="optional">この表紙</span></span><p class="field-help">スクラップブック風は専用の白ふちで飾ります。「シンプル」に戻すと、選んでいた枠を使えます。</p></div>` : `<div class="field"><span class="field-label">写真の枠<span class="optional">この${isCover ? '表紙' : 'ページ'}</span></span><div class="frame-options" role="group" aria-label="${isCover ? '表紙' : 'このページ'}の写真の枠">${FRAME_OPTIONS.map(({ value, label }) => `<button type="button" class="frame-option" data-action="frame" data-frame="${value}" aria-pressed="${frame === value}"><span class="frame-preview frame-preview-${value}" aria-hidden="true"><span class="frame-preview-photo"></span></span><span>${label}</span></button>`).join('')}</div><p class="field-help">写真ごとに選べます。角丸は写真の角も丸くなります。PDF・PNGにも反映します。</p></div>`}
     <div class="field"><span class="field-label">文字のフォント<span class="optional">全ページ共通</span></span><div class="font-options" role="group" aria-label="アルバムのフォント">${FONT_OPTIONS.map(({ value, label, family }) => `<button type="button" class="font-option" data-action="font" data-font="${value}" aria-pressed="${album.font === value}"><span class="font-preview" style="font-family:${escape(family)}">あいうえお</span><span>${label}</span></button>`).join('')}</div><p class="field-help">タイトル・日付・ひとことに反映します。</p></div>
     <div class="field theme-field"><span class="field-label">アルバムの色・背景<span class="optional">全ページ共通</span></span><div class="theme-options" role="group" aria-label="紙と文字の色">${[['linen', 'きなり', '#ede5d3'], ['sky', '空色', '#dcebf0'], ['rose', 'さくら', '#f1dfe0'], ['plain', '背景なし（白）', '#ffffff']].map(([value, label, color]) => `<button type="button" class="theme-option" data-action="theme" data-theme="${value}" aria-pressed="${album.theme === value}"><span class="theme-swatch" style="--swatch:${color}"></span>${label}</button>`).join('')}</div>
       ${album.theme === 'plain' ? `<p class="field-help">印刷向けの白い台紙です。背景画像や台紙の色・飾りを表示しません。${album.backgroundImage ? '背景画像は残っています。ほかの色を選ぶと戻せます。' : 'ほかの色を選ぶと、背景画像も設定できます。'}</p>` : `<button type="button" class="background-picker ${album.backgroundImage ? 'has-background' : ''}" data-action="choose-background" aria-label="背景画像を${album.backgroundImage ? '差し替える' : '選ぶ'}">${album.backgroundImage ? `<img src="${escape(album.backgroundImage)}" alt=""><span><strong>背景画像を差し替える</strong><small>${escape(album.backgroundImageName || '選択した画像')}</small></span>` : `${icon('image')}<span><strong>背景画像を選ぶ</strong><small>好きな絵や模様を、アルバムの台紙に。</small></span>`}</button>
       ${album.backgroundImage ? `<button class="image-remove" type="button" data-action="remove-background">背景画像を外す</button><div class="background-opacity"><label for="background-opacity">背景画像の濃さ <output for="background-opacity" id="background-opacity-value">${Math.round(album.backgroundOpacity * 100)}%</output></label><input id="background-opacity" type="range" data-field="backgroundOpacity" min="0" max="100" step="1" value="${Math.round(album.backgroundOpacity * 100)}" aria-describedby="background-help"></div>` : ''}
-      <p class="field-help" id="background-help">表紙と全ページに反映します。背景は中央で切り抜き、写真と文字は上に重ねます。</p>`}
+      <p class="field-help" id="background-help">${album.coverStyle === 'scrapbook' ? '背景画像は中のページに反映します。スクラップブック風の表紙には専用のコルク柄を使います。' : '表紙と全ページに反映します。背景は中央で切り抜き、写真と文字は上に重ねます。'}</p>`}
     </div>
     ${isCover ? '' : `<button type="button" class="delete-page" data-action="delete-page">${icon('trash')}このページを削除</button>`}
   `;
@@ -341,7 +347,7 @@ async function replaceBackground(file) {
     album.backgroundImage = result.dataUrl;
     album.backgroundImageName = result.name;
     commit({ full: true, undo });
-    toast('表紙と全ページに背景画像を入れました。濃さも調整できます。', true);
+    toast(album.coverStyle === 'scrapbook' ? '中のページに背景画像を入れました。表紙はコルク柄です。' : '表紙と全ページに背景画像を入れました。濃さも調整できます。', true);
   });
 }
 
@@ -410,6 +416,14 @@ async function handleAction(action, button) {
     case 'open-shelf': await openSavedTab('shelf'); break;
     case 'close-zoom': $('#zoom-dialog').close(); break;
     case 'theme': album.theme = button.dataset.theme; commit({ full: true }); break;
+    case 'cover-style': {
+      const style = button.dataset.coverStyle;
+      if (selected !== 0 || !COVER_STYLES.some(option => option.value === style)) break;
+      album.coverStyle = style;
+      commit({ full: true });
+      document.querySelector(`[data-action="cover-style"][data-cover-style="${style}"]`)?.focus({ preventScroll: true });
+      break;
+    }
     case 'font': {
       if (!FONT_OPTIONS.some((font) => font.value === button.dataset.font)) break;
       album.font = button.dataset.font;

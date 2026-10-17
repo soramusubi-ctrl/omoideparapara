@@ -42,11 +42,11 @@ function instrumentedCanvas() {
         return target.fillText(value, x, y);
       };
       if (property === 'drawImage') return (...args) => {
-        images.push({ args, alpha: target.globalAlpha });
+        images.push({ args, alpha: target.globalAlpha, transform: target.getTransform() });
         return target.drawImage(...args);
       };
       if (property === 'fillRect') return (...args) => {
-        fills.push({ args, alpha: target.globalAlpha, color: target.fillStyle });
+        fills.push({ args, alpha: target.globalAlpha, color: target.fillStyle, transform: target.getTransform() });
         return target.fillRect(...args);
       };
       if (property === 'measureText') return value => {
@@ -532,6 +532,104 @@ test('rounded radii stay finite at extreme aspect ratios on cover and interior',
   }
 });
 
+test('classic covers stay unchanged and scrapbook never changes interior artwork or stored frame choices', { skip: !canvasModule }, async () => {
+  globalThis.Image = canvasModule.Image;
+  const photo = solidImage('#4597b5', 200, 300);
+  const backgroundImage = solidImage('#d5b9c7');
+  const source = { ...album, coverImage: photo, coverFrame: 'rounded', backgroundImage, backgroundOpacity: 0.65, pages: [{ ...album.pages[0], image: photo, frame: 'polaroid' }] };
+  const original = JSON.stringify(source);
+  const baseline = instrumentedCanvas();
+  await renderAlbumPage(baseline.canvas, source, 0);
+  const explicit = instrumentedCanvas();
+  await renderAlbumPage(explicit.canvas, { ...source, coverStyle: 'classic' }, 0);
+  assert.deepEqual(explicit.canvas.toBuffer('image/png'), baseline.canvas.toBuffer('image/png'));
+  for (const coverStyle of ['classic', 'scrapbook']) {
+    const page = instrumentedCanvas();
+    await renderAlbumPage(page.canvas, { ...source, coverStyle }, 1);
+    if (coverStyle === 'classic') baseline.canvas = page.canvas;
+    else assert.deepEqual(page.canvas.toBuffer('image/png'), baseline.canvas.toBuffer('image/png'));
+  }
+  const scrapbook = instrumentedCanvas();
+  await renderAlbumPage(scrapbook.canvas, { ...source, coverStyle: 'scrapbook' }, 0);
+  const differentStoredFrame = instrumentedCanvas();
+  await renderAlbumPage(differentStoredFrame.canvas, { ...source, coverStyle: 'scrapbook', coverFrame: 'polaroid' }, 0);
+  assert.deepEqual(differentStoredFrame.canvas.toBuffer('image/png'), scrapbook.canvas.toBuffer('image/png'));
+  assert.equal(JSON.stringify(source), original);
+});
+
+test('scrapbook ignores unused background decoding, has two colored pins, and plain stays entirely white without content', { skip: !canvasModule }, async () => {
+  let imageCreations = 0;
+  globalThis.Image = class { constructor() { imageCreations += 1; throw new Error('Unused background must not be decoded.'); } };
+  const source = { ...album, coverStyle: 'scrapbook', title: '', subtitle: '', coverImage: null, backgroundImage: 'data:image/png;base64,broken-background', backgroundOpacity: 1 };
+  try {
+    const cork = instrumentedCanvas();
+    await renderAlbumPage(cork.canvas, source, 0);
+    const repeated = instrumentedCanvas();
+    await renderAlbumPage(repeated.canvas, source, 0);
+    assert.deepEqual(cork.canvas.toBuffer('image/png'), repeated.canvas.toBuffer('image/png'), 'Cork artwork must be deterministic.');
+    const pixels = cork.canvas.getContext('2d').getImageData(0, 0, PAGE_WIDTH, PAGE_HEIGHT).data;
+    for (const color of [[180, 93, 78], [92, 130, 117]]) {
+      const points = new Set();
+      for (let offset = 0; offset < pixels.length; offset += 4) {
+        if (color.every((value, channel) => pixels[offset + channel] === value)) points.add(offset / 4);
+      }
+      assert.ok(points.size > 100, 'A colored pushpin head must be visibly present.');
+      let components = 0;
+      while (points.size) {
+        components += 1;
+        const queue = [points.values().next().value]; points.delete(queue[0]);
+        for (let at = 0; at < queue.length; at += 1) for (const next of [queue[at] - 1, queue[at] + 1, queue[at] - PAGE_WIDTH, queue[at] + PAGE_WIDTH]) {
+          if (points.delete(next)) queue.push(next);
+        }
+      }
+      assert.equal(components, 1, 'Each of the two pin colors belongs to one pin head.');
+    }
+    const plain = instrumentedCanvas();
+    await renderAlbumPage(plain.canvas, { ...source, theme: 'plain' }, 0);
+    const white = plain.canvas.getContext('2d').getImageData(0, 0, PAGE_WIDTH, PAGE_HEIGHT).data;
+    assert.ok(white.every(value => value === 255), 'Plain scrapbook without content must have no cork, pins, tape or placeholder ink.');
+    assert.equal(imageCreations, 0);
+  } finally { globalThis.Image = canvasModule.Image; }
+});
+
+test('scrapbook fits long copy and preserves contained image edges and aspect ratios within page bounds', { skip: !canvasModule }, async () => {
+  globalThis.Image = canvasModule.Image;
+  const map = (matrix, x, y) => ({ x: matrix.a * x + matrix.c * y + matrix.e, y: matrix.b * x + matrix.d * y + matrix.f });
+  const scenarios = [[400, 200, false], [200, 400, true], [2400, 1, false], [1, 2400, true]];
+  for (const [width, height, long] of scenarios) for (const fit of ['contain', 'cover']) {
+    const photo = canvasModule.createCanvas(width, height);
+    const ctx = photo.getContext('2d');
+    ctx.fillStyle = '#d7b85c'; ctx.fillRect(0, 0, width, height);
+    for (const [i, color] of ['#ff0000', '#00ff00', '#0000ff', '#ff00ff'].entries()) {
+      ctx.fillStyle = color; ctx.fillRect(i % 2 ? width * 0.75 : 0, i > 1 ? height * 0.75 : 0, width / 4, height / 4);
+    }
+    const source = { ...album, coverStyle: 'scrapbook', font: 'rounded', coverImage: photo.toDataURL(), coverFit: fit, title: long ? '家族と過ごした大切な時間。'.repeat(12).slice(0, 120) : '思い出のかけら', subtitle: long ? '何気ない毎日のなかにある、かけがえのない思い出を残して。'.repeat(8).slice(0, 180) : 'みんなで過ごした一日。' };
+    const result = instrumentedCanvas();
+    await renderAlbumPage(result.canvas, source, 0);
+    const label = result.fills.find(fill => typeof fill.color === 'string' && fill.color.toLowerCase() === '#fffaef').args;
+    for (const item of result.text) {
+      const size = Number(item.font.match(/([\d.]+)px/)[1]);
+      assert.ok(item.x - item.width / 2 > label[0] + 30 && item.x + item.width / 2 < label[0] + label[2] - 30);
+      assert.ok(item.y > label[1] + 35 && item.y + size < label[1] + label[3] - 25);
+    }
+    const drawing = result.images[0];
+    const [, x, y, photoWidth, photoHeight] = drawing.args;
+    assert.ok(Math.abs(photoWidth / photoHeight - width / height) < 0.000001, 'Photographs must not be distorted.');
+    assert.ok(Math.abs(Math.hypot(drawing.transform.a, drawing.transform.b) - 1) < 0.000001);
+    const frame = result.fills.find(fill => typeof fill.color === 'string' && fill.color.toLowerCase() === '#fffefa');
+    for (const [px, py] of [[frame.args[0], frame.args[1]], [frame.args[0] + frame.args[2], frame.args[1]], [frame.args[0], frame.args[1] + frame.args[3]], [frame.args[0] + frame.args[2], frame.args[1] + frame.args[3]]]) {
+      const point = map(frame.transform, px, py);
+      assert.ok(point.x > 100 && point.x < PAGE_WIDTH - 100 && point.y > label[1] + label[3] + 25 && point.y < PAGE_HEIGHT - 120);
+    }
+    if (fit === 'contain' && width >= 20 && height >= 20) {
+      for (const [i, expected] of [[0,[255,0,0]],[1,[0,255,0]],[2,[0,0,255]],[3,[255,0,255]]]) {
+        const point = map(drawing.transform, x + photoWidth * (i % 2 ? 0.9 : 0.1), y + photoHeight * (i > 1 ? 0.9 : 0.1));
+        assert.deepEqual(rgbAt(result.canvas, Math.floor(point.x), Math.floor(point.y)), expected);
+      }
+    }
+  }
+});
+
 test('font readiness is awaited, cached per family, and extended for newly edited glyphs', { skip: !canvasModule }, async () => {
   globalThis.Image = canvasModule.Image;
   const previousDocument = globalThis.document;
@@ -678,15 +776,15 @@ test('browser download APIs produce actual PNG and all album pages in a PDF', { 
 
     const photo = solidImage('#348bb2', 600, 250);
     const framedAlbum = {
-      ...exportAlbum, coverImage: photo, coverFrame: 'white',
+      ...exportAlbum, coverStyle: 'scrapbook', theme: 'linen', backgroundImage: null, coverImage: photo, coverFrame: 'white',
       pages: ['polaroid', 'rounded'].map(frame => ({ image: photo, frame, fit: 'contain', date: '', note: '' })),
     };
-    const framedPng = await downloadPng(framedAlbum, 1);
+    const framedPng = await downloadPng(framedAlbum, 0);
     const pngImage = await canvasModule.loadImage(Buffer.from(await framedPng.arrayBuffer()));
     const actualPng = canvasModule.createCanvas(PAGE_WIDTH, PAGE_HEIGHT);
     actualPng.getContext('2d').drawImage(pngImage, 0, 0);
     const preview = instrumentedCanvas();
-    await renderAlbumPage(preview.canvas, framedAlbum, 1);
+    await renderAlbumPage(preview.canvas, framedAlbum, 0);
     assert.deepEqual(actualPng.getContext('2d').getImageData(0, 0, PAGE_WIDTH, PAGE_HEIGHT).data, preview.canvas.getContext('2d').getImageData(0, 0, PAGE_WIDTH, PAGE_HEIGHT).data, 'Framed PNG must match the preview pixel for pixel.');
     const framedPdf = Buffer.from(await (await downloadPdf(framedAlbum)).arrayBuffer());
     let framedPage = 0;

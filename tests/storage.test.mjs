@@ -28,6 +28,7 @@ test('new album has independent valid empty defaults', () => {
   assert.equal(first.font, 'serif');
   assert.equal(first.coverImage, null);
   assert.equal(first.coverFrame, 'none');
+  assert.equal(first.coverStyle, 'classic');
   assert.equal(first.backgroundImage, null);
   assert.equal(first.backgroundImageName, '');
   assert.equal(first.backgroundOpacity, 0.22);
@@ -35,6 +36,28 @@ test('new album has independent valid empty defaults', () => {
   assert.notEqual(first.id, second.id);
   assert.notEqual(first.pages, second.pages);
   assert.deepEqual(validateAlbum(first), first);
+});
+
+test('legacy version-one JSON defaults to the classic cover without mutating its text or source', () => {
+  const legacy = { ...createAlbum(), title: '  以前の一冊 🌿  ', pages: [page({ note: '思い出を\nそのまま残す' })] };
+  delete legacy.coverStyle;
+  const normalized = validateAlbum(JSON.parse(JSON.stringify(legacy)));
+  assert.equal(normalized.schemaVersion, 1);
+  assert.deepEqual(normalized, { ...legacy, coverStyle: 'classic' });
+  assert.equal(Object.hasOwn(legacy, 'coverStyle'), false);
+  assert.deepEqual(JSON.parse(serializeAlbum(legacy)), normalized);
+});
+
+test('cover style accepts only exact supported values and rejects accessors without invocation', () => {
+  for (const coverStyle of ['classic', 'scrapbook']) assert.equal(validateAlbum({ ...createAlbum(), coverStyle }).coverStyle, coverStyle);
+  for (const coverStyle of [undefined, null, '', 'Classic', ' scrapbook ', 'unknown', true, 1, {}, [], new String('scrapbook')]) {
+    assert.throws(() => validateAlbum({ ...createAlbum(), coverStyle }), /表紙のデザイン/);
+  }
+  const album = createAlbum();
+  let invoked = false;
+  Object.defineProperty(album, 'coverStyle', { get() { invoked = true; return 'scrapbook'; } });
+  assert.throws(() => validateAlbum(album), /表紙のデザイン/);
+  assert.equal(invoked, false);
 });
 
 test('legacy version-one albums normalize missing cover and page frames without changing source content', () => {
@@ -309,6 +332,20 @@ test('each supported font survives JSON and draft save/load roundtrips', async (
   } finally { fake.restore(); }
 });
 
+test('classic and scrapbook cover styles survive JSON import and draft save/load roundtrips', async () => {
+  const fake = installFakeIndexedDB();
+  try {
+    for (const coverStyle of ['classic', 'scrapbook']) {
+      const album = { ...createAlbum(), coverStyle, pages: [page({ note: '表紙を変えても残る思い出' })] };
+      const imported = validateAlbum(JSON.parse(serializeAlbum(album)));
+      assert.deepEqual(imported, album);
+      assert.deepEqual(await saveDraft(imported), album);
+      assert.deepEqual(await loadDraft(), album);
+      assert.equal(fake.state.value.coverStyle, coverStyle);
+    }
+  } finally { fake.restore(); }
+});
+
 test('independent cover and page frames survive JSON and draft save/load roundtrips', async () => {
   const fake = installFakeIndexedDB();
   const frames = ['none', 'white', 'polaroid', 'rounded'];
@@ -348,13 +385,14 @@ test('legacy corners frames migrate to rounded in validation, JSON and drafts wi
   } finally { fake.restore(); }
 });
 
-test('legacy draft records gain background, font and frame defaults when loaded and saved', async () => {
+test('legacy draft records gain background, font, frame and cover style defaults when loaded and saved', async () => {
   const legacy = { ...createAlbum(), pages: [page()] };
   delete legacy.backgroundImage;
   delete legacy.backgroundImageName;
   delete legacy.backgroundOpacity;
   delete legacy.font;
   delete legacy.coverFrame;
+  delete legacy.coverStyle;
   delete legacy.pages[0].frame;
   const fake = installFakeIndexedDB({ value: legacy });
   try {
@@ -365,6 +403,7 @@ test('legacy draft records gain background, font and frame defaults when loaded 
     assert.equal(loaded.backgroundOpacity, 0.22);
     assert.equal(loaded.font, 'serif');
     assert.equal(loaded.coverFrame, 'none');
+    assert.equal(loaded.coverStyle, 'classic');
     assert.equal(loaded.pages[0].frame, 'none');
     await saveDraft(loaded);
     assert.deepEqual(fake.state.value, loaded);
@@ -402,6 +441,7 @@ test('denied IDB, blocked connections and corrupted drafts never masquerade as a
     { value: { broken: true } },
     { value: { ...createAlbum(), font: 'invalid' } },
     { value: { ...createAlbum(), coverFrame: 'invalid' } },
+    { value: { ...createAlbum(), coverStyle: 'invalid' } },
     { value: { ...createAlbum(), pages: [page({ frame: 'invalid' })] } },
   ]) {
     const fake = installFakeIndexedDB(options);

@@ -7,6 +7,7 @@ const MAX_IMAGE_EDGE = 2400;
 const DEFAULT_BACKGROUND_OPACITY = 0.22;
 const THEMES = new Set(['linen', 'sky', 'rose', 'plain']);
 const FONTS = new Set(['serif', 'sans', 'rounded']);
+const COVER_STYLES = new Set(['classic', 'scrapbook']);
 const FITS = new Set(['contain', 'cover']);
 const FRAMES = new Set(['none', 'white', 'polaroid', 'rounded']);
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
@@ -268,6 +269,7 @@ export function createAlbum() {
     coverImageName: '',
     coverFit: 'contain',
     coverFrame: 'none',
+    coverStyle: 'classic',
     backgroundImage: null,
     backgroundImageName: '',
     backgroundOpacity: DEFAULT_BACKGROUND_OPACITY,
@@ -312,6 +314,7 @@ export function validateAlbum(candidate) {
     coverImageName: boundedString(own(album, 'coverImageName', '表紙の写真の名前'), 260, '表紙の写真の名前'),
     coverFit: enumValue(own(album, 'coverFit', '表紙の表示方法'), FITS, '表紙の表示方法'),
     coverFrame: frameValue(optionalOwn(album, 'coverFrame', '表紙のフレーム', 'none'), '表紙のフレーム'),
+    coverStyle: enumValue(optionalOwn(album, 'coverStyle', '表紙のデザイン', 'classic'), COVER_STYLES, '表紙のデザイン'),
     backgroundImage: imageValue(optionalOwn(album, 'backgroundImage', '背景の写真', null)),
     backgroundImageName: boundedString(optionalOwn(album, 'backgroundImageName', '背景の写真の名前', ''), 260, '背景の写真の名前'),
     backgroundOpacity: backgroundOpacity(optionalOwn(album, 'backgroundOpacity', '背景の濃さ', DEFAULT_BACKGROUND_OPACITY)),

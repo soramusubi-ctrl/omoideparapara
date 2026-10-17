@@ -341,6 +341,147 @@ function folio(ctx, index, theme, family, hasBackground = false) {
   }
 }
 
+function corkPaper(ctx) {
+  const base = ctx.createLinearGradient(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
+  base.addColorStop(0, '#CCA77B');
+  base.addColorStop(1, '#BE976A');
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
+  // Seeded fine pores and flakes keep previews and exported pages identical.
+  let seed = 0x715A43;
+  const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+  ctx.save();
+  for (let i = 0; i < 26000; i += 1) {
+    const x = random() * PAGE_WIDTH;
+    const y = random() * PAGE_HEIGHT;
+    const radius = 0.55 + random() * 2.5;
+    ctx.fillStyle = i % 3 ? '#765233' : '#FFF0CF';
+    ctx.globalAlpha = 0.035 + random() * 0.12;
+    ctx.beginPath();
+    ctx.ellipse(x, y, radius, radius * (0.3 + random() * 0.55), random() * Math.PI, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  for (let i = 0; i < 2700; i += 1) {
+    const x = random() * PAGE_WIDTH;
+    const y = random() * PAGE_HEIGHT;
+    const size = 2 + random() * 7;
+    ctx.fillStyle = i % 2 ? '#F4D4A6' : '#8E653F';
+    ctx.globalAlpha = 0.035 + random() * 0.055;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + size, y - size * 0.25);
+    ctx.lineTo(x + size * 1.3, y + size * 0.35);
+    ctx.lineTo(x + size * 0.25, y + size * 0.7);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function maskingTape(ctx, x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(0.045);
+  ctx.fillStyle = 'rgba(250, 239, 204, 0.72)';
+  ctx.beginPath();
+  ctx.moveTo(-86, -20);
+  ctx.lineTo(83, -22);
+  ctx.lineTo(89, -13);
+  ctx.lineTo(84, -4);
+  ctx.lineTo(89, 6);
+  ctx.lineTo(84, 20);
+  ctx.lineTo(-85, 21);
+  ctx.lineTo(-81, 11);
+  ctx.lineTo(-88, 1);
+  ctx.lineTo(-82, -10);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 253, 227, 0.3)';
+  ctx.lineWidth = 1;
+  for (let x = -74; x < 80; x += 9) {
+    ctx.beginPath(); ctx.moveTo(x, -16); ctx.lineTo(x + 2, 17); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function pushpin(ctx, x, y, color) {
+  ctx.save();
+  ctx.strokeStyle = 'rgba(77, 70, 57, 0.5)';
+  ctx.lineWidth = 2.2;
+  ctx.beginPath(); ctx.moveTo(x + 2, y + 8); ctx.lineTo(x + 8, y + 23); ctx.stroke();
+  ctx.shadowColor = 'rgba(63, 46, 29, 0.28)';
+  ctx.shadowBlur = 6;
+  ctx.shadowOffsetX = 2;
+  ctx.shadowOffsetY = 4;
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(x, y, 12.5, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowColor = 'transparent';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.33)';
+  ctx.beginPath(); ctx.ellipse(x - 3.5, y - 4, 4, 2.5, -0.45, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+function scrapbookCover(ctx, album, image, theme, family) {
+  const plain = theme === THEMES.plain;
+  if (plain) { ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT); }
+  else corkPaper(ctx);
+  const title = limitedText(album.title, 120);
+  const subtitle = limitedText(album.subtitle, 180);
+  const titleLayout = textLayout(ctx, title, { size: 72, minSize: 34, width: 846, maxHeight: 250, leading: 1.36, weight: 500, family });
+  const subtitleLayout = textLayout(ctx, subtitle, { size: 27, minSize: 18, width: 846, maxHeight: 145, leading: 1.65, family });
+  const gap = title && subtitle ? 26 : 0;
+  const contentHeight = titleLayout.height + gap + subtitleLayout.height;
+  const label = { x: 132, y: 142, width: 976, height: Math.max(282, contentHeight + 114) };
+  ctx.save();
+  ctx.fillStyle = plain ? '#FFFFFF' : '#FFFAEF';
+  if (!plain) {
+    ctx.shadowColor = 'rgba(74, 52, 28, 0.14)';
+    ctx.shadowBlur = 16;
+    ctx.shadowOffsetY = 6;
+  }
+  ctx.fillRect(label.x, label.y, label.width, label.height);
+  ctx.shadowColor = 'transparent';
+  if (!plain) {
+    ctx.strokeStyle = '#E2D6BE';
+    ctx.lineWidth = 1.2;
+    ctx.strokeRect(label.x + 0.6, label.y + 0.6, label.width - 1.2, label.height - 1.2);
+  }
+  ctx.restore();
+  const titleTop = label.y + (label.height - contentHeight) / 2;
+  drawText(ctx, titleLayout, PAGE_WIDTH / 2, titleTop, theme.ink, 'center');
+  drawText(ctx, subtitleLayout, PAGE_WIDTH / 2, titleTop + titleLayout.height + gap, plain ? theme.muted : '#6D7265', 'center');
+
+  const top = Math.max(548, label.y + label.height + 82);
+  const box = { x: 166, y: top, width: 908, height: 1550 - top };
+  const centerX = box.x + box.width / 2;
+  const centerY = box.y + box.height / 2;
+  ctx.save();
+  ctx.translate(centerX, centerY);
+  ctx.rotate(-0.024);
+  ctx.translate(-centerX, -centerY);
+  if (image) {
+    drawPhoto(ctx, image, box, album.coverFit, theme, 'white');
+    if (!plain) {
+      // Attach tape to the actual fitted frame, keeping it above photo pixels.
+      const innerWidth = box.width - 64;
+      const innerHeight = box.height - 64;
+      const scale = album.coverFit === 'cover'
+        ? Math.max(innerWidth / image.naturalWidth, innerHeight / image.naturalHeight)
+        : Math.min(innerWidth / image.naturalWidth, innerHeight / image.naturalHeight);
+      const photoTop = album.coverFit === 'cover' ? box.y + 32 : box.y + 32 + (innerHeight - image.naturalHeight * scale) / 2;
+      maskingTape(ctx, centerX, photoTop - 32);
+    }
+  } else {
+    emptyPhoto(ctx, box, plain ? theme : { ...theme, surface: '#FFFEFA', line: '#DED6C5', accent: '#9A9E85' });
+    if (!plain) maskingTape(ctx, centerX, box.y - 10);
+  }
+  ctx.restore();
+  if (!plain) {
+    pushpin(ctx, label.x + 38, label.y + 22, '#B45D4E');
+    pushpin(ctx, label.x + label.width - 38, label.y + 24, '#5C8275');
+  }
+}
+
 /** Render one complete, print-resolution A5 portrait page. Index 0 is the cover. */
 export async function renderAlbumPage(canvas, album, index = 0) {
   if (!canvas || typeof canvas.getContext !== 'function') throw new TypeError('A canvas is required.');
@@ -356,9 +497,10 @@ export async function renderAlbumPage(canvas, album, index = 0) {
   await waitForFonts(family, fontSample);
   const item = index === 0 ? null : album.pages[index - 1];
   const imageSource = index === 0 ? album.coverImage : item.image;
+  const scrapbook = index === 0 && album.coverStyle === 'scrapbook';
   const backgroundOpacity = Number.isFinite(album.backgroundOpacity)
     ? Math.max(0, Math.min(1, album.backgroundOpacity)) : 0.22;
-  const backgroundSource = album.theme !== 'plain' && backgroundOpacity > 0 ? album.backgroundImage : null;
+  const backgroundSource = !scrapbook && album.theme !== 'plain' && backgroundOpacity > 0 ? album.backgroundImage : null;
   const [image, background] = await Promise.all([
     imageSource ? loadImage(imageSource) : null,
     backgroundSource ? loadImage(backgroundSource, '背景画像') : null,
@@ -369,6 +511,10 @@ export async function renderAlbumPage(canvas, album, index = 0) {
   if (!ctx) throw new Error('このブラウザーではアルバムを描画できません。');
   const theme = THEMES[album.theme] || THEMES.linen;
   ctx.clearRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
+  if (scrapbook) {
+    scrapbookCover(ctx, album, image, theme, family);
+    return canvas;
+  }
   paper(ctx, theme, background, backgroundOpacity);
 
   if (index === 0) {

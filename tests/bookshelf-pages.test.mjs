@@ -55,6 +55,30 @@ test('bookshelf reads summaries only and builds safe per-book links with literal
   assert.equal(h.nodes['shelf-count'].textContent, '1冊のアルバム');
 });
 
+test('bookshelf keeps each cover design and title with its photo, including plain paper and image failures', async () => {
+  const h = setupShelf({ listAlbums: async () => [
+    summary('legacy'),
+    { ...summary('scrap', '旅の写真'), coverStyle: 'scrapbook', thumbnail: 'data:image/jpeg;base64,YQ==' },
+    { ...summary('plain', '白い台紙'), coverStyle: 'scrapbook', theme: 'plain', thumbnail: 'data:image/jpeg;base64,Yg==' },
+  ] });
+  await h.controller.reload();
+  const cards = h.nodes['shelf-grid'].children.map(descendants);
+  assert.ok(cards[0].some(node => node.className === 'shelf-cover cover-linen'));
+  assert.ok(cards[1].some(node => node.className === 'shelf-cover cover-linen cover-scrapbook'));
+  assert.ok(cards[2].some(node => node.className === 'shelf-cover cover-plain cover-scrapbook'));
+  for (const elements of cards.slice(1)) {
+    const photo = elements.find(node => node.className === 'shelf-scrap-photo');
+    const thumbnail = elements.find(node => node.tagName === 'IMG');
+    const title = elements.find(node => node.className === 'shelf-cover-title');
+    assert.ok(photo.children.includes(thumbnail));
+    assert.equal(title.hidden, false);
+    assert.ok(elements.filter(node => ['shelf-scrap-tape', 'shelf-scrap-pins'].includes(node.className)).every(node => node.attributes['aria-hidden'] === 'true'));
+    thumbnail.dispatch('error');
+    assert.equal(photo.children.length, 0);
+    assert.equal(title.hidden, false);
+  }
+});
+
 test('overlapping reloads ignore stale successful responses and stale errors', async () => {
   for (const oldFails of [false, true]) {
     const old = deferred(), recent = deferred(); let calls = 0;
